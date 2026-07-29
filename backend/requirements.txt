@@ -1,0 +1,16 @@
+# Django 5.2 LTS (et non 5.0.6 comme le backend `pmc`) : l'environnement local est en
+# Python 3.13, que Django 5.0 ne supporte pas officiellement. 5.2 est LTS, supportée
+# jusqu'en avril 2028.
+Django==5.2.7
+djangorestframework==3.15.2
+djangorestframework-simplejwt==5.3.1
+django-cors-headers==4.6.0
+django-filter==24.3
+drf-spectacular==0.28.0
+psycopg[binary]==3.2.3
+python-dotenv==1.0.1
+gunicorn==23.0.0
+Pillow==11.1.0
+whitenoise==6.8.2
+openpyxl==3.1.5
+reportlab==4.2.5

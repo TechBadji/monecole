@@ -1,0 +1,349 @@
+"""Jeu de données de démonstration.
+
+Reproduit la structure du classeur source — les dix classes, les rubriques
+salariales A/B/C, les seize rubriques de charge — et la renseigne avec des données
+plausibles mais **déterministes** : un `random.seed` fixe garantit que deux
+exécutions produisent les mêmes totaux, condition nécessaire pour que les tests de
+non-régression aient un sens.
+
+    python manage.py seed_demo --reset
+"""
+
+import datetime
+import random
+
+from django.contrib.auth import get_user_model
+from django.core.management.base import BaseCommand
+from django.db import transaction
+
+from apps.core.models import Role, School, SchoolYear, Subscription
+from apps.core.periods import default_year_bounds, end_of_month, month_ends
+from apps.core.tenancy import tenant_context, unscoped
+from apps.finance.models import DEFAULT_EXPENSE_CATEGORIES, Expense, ExpenseCategory, OtherIncome
+from apps.staff.models import Salary, SalaryRubric, Teacher
+from apps.students.models import (
+    ClassRoom,
+    Enrollment,
+    Family,
+    FeeSchedule,
+    Level,
+    MonthlyPayment,
+    Student,
+)
+
+User = get_user_model()
+
+# Les dix classes du classeur, dans l'ordre pédagogique.
+CLASSES = [
+    ("GARDERIE", Level.PRESCHOOL), ("PS", Level.PRESCHOOL), ("MS", Level.PRESCHOOL),
+    ("GS", Level.PRESCHOOL), ("CI", Level.PRIMARY), ("CP", Level.PRIMARY),
+    ("CE1", Level.PRIMARY), ("CE2", Level.PRIMARY), ("CM1", Level.PRIMARY),
+    ("CM2", Level.PRIMARY),
+]
+
+# Tarifs indicatifs en FCFA, croissants du préscolaire au CM2.
+FEES = {
+    "GARDERIE": (15_000, 10_000), "PS": (20_000, 12_000), "MS": (20_000, 12_000),
+    "GS": (20_000, 13_000), "CI": (25_000, 15_000), "CP": (25_000, 15_000),
+    "CE1": (25_000, 16_000), "CE2": (25_000, 16_000), "CM1": (30_000, 18_000),
+    "CM2": (30_000, 18_000),
+}
+
+FIRST_NAMES = [
+    "Aminata", "Mamadou", "Fatou", "Ibrahima", "Aïssatou", "Ousmane", "Khadija",
+    "Cheikh", "Mariama", "Abdoulaye", "Ndeye", "Moussa", "Awa", "Modou", "Bineta",
+    "Serigne", "Sokhna", "Alioune", "Coumba", "Babacar", "Rokhaya", "Pape",
+]
+LAST_NAMES = [
+    "Diop", "Ndiaye", "Fall", "Sow", "Ba", "Sarr", "Gueye", "Diallo", "Faye",
+    "Mbaye", "Cissé", "Sylla", "Camara", "Thiam", "Seck", "Niang", "Bodian", "Sakho",
+]
+
+TEACHERS = [
+    ("Ousmane", "Bodian", "M", "Instituteur", "CM1-CM2"),
+    ("Aïssatou", "Sakho", "F", "Institutrice", "CE1-CE2"),
+    ("Mamadou", "Diallo", "M", "Instituteur", "CI-CP"),
+    ("Fatou", "Ndiaye", "F", "Éducatrice préscolaire", "PS-MS"),
+    ("Bineta", "Faye", "F", "Éducatrice préscolaire", "GS-Garderie"),
+    ("Cheikh", "Thiam", "M", "Professeur d'arabe", "Toutes classes"),
+    ("Rokhaya", "Seck", "F", "Professeure d'anglais", "Élémentaire"),
+    ("Awa", "Camara", "F", "Assistante stagiaire", "Préscolaire"),
+    ("Modou", "Sylla", "M", "Gardien", ""),
+    ("Coumba", "Sarr", "F", "Femme de ménage", ""),
+]
+
+EXPENSE_SAMPLES = [
+    ("RENT", "Loyer des bâtiments", 450_000, 12),
+    ("SALARY", "Salaires du personnel", 1_350_000, 12),
+    ("ELECTRICITY", "Facture SENELEC", 85_000, 12),
+    ("WATER", "Facture SEN'EAU", 32_000, 12),
+    ("SUPPLIES", "Fournitures scolaires et de bureau", 120_000, 6),
+    ("TEACHING_EQUIPMENT", "Matériel pédagogique", 180_000, 3),
+    ("TELECOM", "Internet et téléphonie", 45_000, 12),
+    ("MAINTENANCE", "Travaux et réparations", 220_000, 4),
+    ("TRANSPORT", "Frais de transport", 60_000, 8),
+    ("INSURANCE", "Assurance de l'établissement", 350_000, 1),
+    ("HOSPITALITY", "Réceptions et restauration", 75_000, 3),
+    ("ADVERTISING", "Campagne d'inscription", 150_000, 2),
+    ("SMALL_EQUIPMENT", "Petit matériel", 40_000, 5),
+    ("ADMIN_CHARGES", "Dossiers de régularisation", 90_000, 2),
+    ("TRAINING", "Formation du personnel", 200_000, 1),
+    ("SALARY_ARREARS", "Arriéré de salaire réglé", 250_000, 2),
+]
+
+
+class Command(BaseCommand):
+    help = "Charge un jeu de données de démonstration reproduisant le classeur source."
+
+    def add_arguments(self, parser):
+        parser.add_argument("--reset", action="store_true", help="Supprime l'école de démo existante.")
+        parser.add_argument("--students", type=int, default=18, help="Élèves par classe (défaut : 18).")
+        parser.add_argument("--year", type=int, default=2025, help="Année de début de l'exercice.")
+
+    @transaction.atomic
+    def handle(self, *args, **options):
+        random.seed(20252026)  # déterminisme : mêmes totaux à chaque exécution
+
+        if options["reset"]:
+            with unscoped():
+                School.objects.filter(slug="darou-louqmane").delete()
+                User.objects.filter(school__isnull=True, email="super@monecole.sn").delete()
+            self.stdout.write(self.style.WARNING("École de démonstration supprimée."))
+
+        subscription = Subscription.objects.create(
+            plan=Subscription.Plan.STANDARD,
+            status=Subscription.Status.ACTIVE,
+            current_period_end=datetime.date(options["year"] + 1, 9, 30),
+            max_students=300,
+        )
+        school = School.objects.create(
+            name="Groupe Scolaire Darou Louqmane",
+            slug="darou-louqmane",
+            address="Dakar, Sénégal",
+            phone="+221 33 000 00 00",
+            email="contact@darou-louqmane.sn",
+            country="SN",
+            currency="XOF",
+            subscription=subscription,
+        )
+
+        with tenant_context(school):
+            year = self._create_year(school, options["year"])
+            self._create_users(school)
+            classrooms = self._create_classes(school, year)
+            teachers = self._create_teachers(school)
+            self._create_salaries(school, year, teachers)
+            categories = self._create_categories(school)
+            self._create_students(school, year, classrooms, options["students"])
+            self._create_expenses(school, year, categories)
+            self._create_other_income(school, year)
+
+        self._summary(school, year)
+
+    # ------------------------------------------------------------------ #
+
+    def _create_year(self, school, start_year):
+        start, end = default_year_bounds(start_year)
+        return SchoolYear.objects.create(
+            school=school,
+            label=f"{start_year}/{start_year + 1}",
+            start_date=start,
+            end_date=end,
+            tuition_months=9,
+            is_current=True,
+        )
+
+    def _create_users(self, school):
+        accounts = [
+            ("admin@darou-louqmane.sn", "Awa", "Diop", Role.ADMIN),
+            ("comptable@darou-louqmane.sn", "Ibrahima", "Fall", Role.ACCOUNTANT),
+            ("secretaire@darou-louqmane.sn", "Ndeye", "Gueye", Role.SECRETARY),
+        ]
+        for email, first, last, role in accounts:
+            User.objects.create_user(
+                email=email, password="MonEcole2026!", first_name=first,
+                last_name=last, role=role, school=school,
+            )
+        User.objects.create_superuser(
+            email="super@monecole.sn", password="MonEcole2026!",
+            first_name="Super", last_name="Admin",
+        )
+
+    def _create_classes(self, school, year):
+        classrooms = []
+        for order, (name, level) in enumerate(CLASSES):
+            classroom = ClassRoom.objects.create(
+                school=school, name=name, level=level, order=order, capacity=35
+            )
+            registration, tuition = FEES[name]
+            FeeSchedule.objects.create(
+                school=school, classroom=classroom, year=year,
+                registration_fee=registration, monthly_tuition=tuition,
+                monthly_canteen=10_000, monthly_reinforcement=5_000,
+                uniform_fee=12_000, insurance_fee=3_000, ape_fee=5_000,
+            )
+            classrooms.append(classroom)
+        return classrooms
+
+    def _create_teachers(self, school):
+        teachers = []
+        for first, last, sex, function, classes in TEACHERS:
+            teachers.append(
+                Teacher.objects.create(
+                    school=school, first_name=first, last_name=last, sex=sex,
+                    function=function, class_type=classes,
+                    specialty=function, corps="Enseignement privé",
+                    service_start_date=datetime.date(2020, 10, 1),
+                    contract_type=Teacher.ContractType.PERMANENT,
+                )
+            )
+        return teachers
+
+    def _create_salaries(self, school, year, teachers):
+        """Trois rubriques A, B, C comme dans l'onglet « Salaires »."""
+        rubrics = [
+            SalaryRubric.objects.create(school=school, code="A", label="Personnel enseignant", order=0),
+            SalaryRubric.objects.create(school=school, code="B", label="Personnel administratif", order=1),
+            SalaryRubric.objects.create(school=school, code="C", label="Personnel de service", order=2),
+        ]
+        monthly = {"A": 900_000, "B": 300_000, "C": 150_000}
+        for period in year.fiscal_months:
+            for rubric in rubrics:
+                Salary.objects.create(
+                    school=school, rubric=rubric, year=year, period=period,
+                    gross_amount=monthly[rubric.code],
+                    social_contributions=monthly[rubric.code] // 10,
+                    paid_at=period,
+                )
+
+    def _create_categories(self, school):
+        categories = {}
+        for order, (code, label) in enumerate(DEFAULT_EXPENSE_CATEGORIES):
+            categories[code] = ExpenseCategory.objects.create(
+                school=school, code=code, label=label, order=order
+            )
+        return categories
+
+    def _create_students(self, school, year, classrooms, per_class):
+        periods = year.tuition_month_ends
+        today = datetime.date.today()
+
+        for classroom in classrooms:
+            schedule = FeeSchedule.objects.get(classroom=classroom, year=year)
+            for index in range(per_class):
+                first = random.choice(FIRST_NAMES)
+                last = random.choice(LAST_NAMES)
+                family = Family.objects.create(
+                    school=school, name=last,
+                    primary_contact=f"{random.choice(FIRST_NAMES)} {last}",
+                    phone=f"+2217{random.randint(0, 9)}{random.randint(1000000, 9999999)}",
+                )
+                student = Student.objects.create(
+                    school=school, first_name=first, last_name=last,
+                    date_of_birth=datetime.date(
+                        2025 - 12 + classroom.order, random.randint(1, 12), random.randint(1, 28)
+                    ),
+                    sex=random.choice(["M", "F"]), classroom=classroom, family=family,
+                    parent_name=family.primary_contact, parent_phone=family.phone,
+                    enrollment_date=datetime.date(year.start_date.year, 9, random.randint(1, 30)),
+                )
+
+                # 85 % des inscriptions sont réglées — un reliquat d'impayés rend le
+                # jeu de données représentatif de la réalité d'une école.
+                paid = random.random() < 0.85
+                Enrollment.objects.create(
+                    school=school, student=student, year=year, classroom=classroom,
+                    registration_paid=paid,
+                    registration_amount=schedule.registration_fee if paid else 0,
+                    uniform_amount=schedule.uniform_fee if paid else 0,
+                    insurance_amount=schedule.insurance_fee if paid else 0,
+                    ape_amount=schedule.ape_fee if paid else 0,
+                    paid_at=end_of_month(year.start_date) if paid else None,
+                )
+
+                takes_canteen = random.random() < 0.4
+                takes_reinforcement = random.random() < 0.25
+                for period in periods:
+                    if period > today:
+                        break
+                    # Taux de recouvrement dégressif : les impayés s'accumulent en
+                    # cours d'année, comme observé en pratique.
+                    if random.random() > 0.9:
+                        continue
+                    MonthlyPayment.objects.create(
+                        school=school, student=student, year=year, period=period,
+                        tuition=schedule.monthly_tuition,
+                        canteen=schedule.monthly_canteen if takes_canteen else 0,
+                        reinforcement=schedule.monthly_reinforcement if takes_reinforcement else 0,
+                        uniform=0,
+                        payment_date=period,
+                        method=random.choice([
+                            MonthlyPayment.Method.CASH,
+                            MonthlyPayment.Method.CASH,
+                            MonthlyPayment.Method.MOBILE_MONEY,
+                        ]),
+                    )
+
+    def _create_expenses(self, school, year, categories):
+        periods = year.fiscal_months
+        today = datetime.date.today()
+        for code, label, amount, occurrences in EXPENSE_SAMPLES:
+            for period in periods[:occurrences]:
+                if period > today:
+                    break
+                variation = random.randint(-5, 10) / 100
+                Expense.objects.create(
+                    school=school, year=year,
+                    operation_date=period.replace(day=min(15, period.day)),
+                    payment_date=period,
+                    label=label,
+                    amount=int(amount * (1 + variation)),
+                    transfer_fee=random.choice([0, 0, 500, 1_000, 2_500]),
+                    category=categories[code],
+                    channel=random.choice([
+                        Expense.Channel.CASH,
+                        Expense.Channel.TRANSFER,
+                        Expense.Channel.MOBILE_MONEY,
+                    ]),
+                    status=Expense.Status.APPROVED,
+                )
+
+    def _create_other_income(self, school, year):
+        """Apports d'actionnaires — ligne « AUTRE PRODUIT » du bilan."""
+        today = datetime.date.today()
+        for period in year.fiscal_months[:6]:
+            if period > today:
+                break
+            OtherIncome.objects.create(
+                school=school, year=year,
+                operation_date=period.replace(day=min(10, period.day)),
+                label="Apport en compte courant d'actionnaire",
+                amount=random.choice([500_000, 750_000, 1_000_000]),
+            )
+
+    def _summary(self, school, year):
+        from apps.reports.services import bilan
+
+        with tenant_context(school):
+            report = bilan(year)
+            students = Student.objects.count()
+            expenses = Expense.objects.count()
+
+        def money(value):
+            return f"{value:,}".replace(",", " ")
+
+        self.stdout.write("")
+        self.stdout.write(self.style.SUCCESS(f"  {school.name} — {year.label}"))
+        self.stdout.write(f"  Élèves ............... {students}")
+        self.stdout.write(f"  Dépenses ............. {expenses}")
+        self.stdout.write(f"  Total ressources ..... {money(report['total_resources']['total'])} XOF")
+        self.stdout.write(f"  Total charges ........ {money(report['total_charges']['total'])} XOF")
+        self.stdout.write(f"  EBE .................. {money(report['ebe']['total'])} XOF")
+        self.stdout.write(f"  Solde du compte ...... {money(report['current_balance'])} XOF")
+        self.stdout.write("")
+        self.stdout.write("  Comptes (mot de passe : MonEcole2026!)")
+        self.stdout.write("    admin@darou-louqmane.sn ....... Administrateur")
+        self.stdout.write("    comptable@darou-louqmane.sn ... Comptable")
+        self.stdout.write("    secretaire@darou-louqmane.sn .. Secrétaire")
+        self.stdout.write("    super@monecole.sn ............. Super administrateur")
+        self.stdout.write("")
