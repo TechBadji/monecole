@@ -1,4 +1,4 @@
-import { StrictMode, type ReactNode } from "react";
+import { StrictMode, Suspense, lazy, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 
@@ -6,19 +6,22 @@ import { AuthProvider, useAuth } from "./auth";
 import Layout from "./components/Layout";
 import { SyncBanner } from "./components/OfflineBanners";
 import { startSyncWatcher } from "./offline/sync";
-import Arrears from "./pages/Arrears";
-import DataImport from "./pages/DataImport";
-import Payroll from "./pages/Payroll";
-import ParentPortal from "./pages/portal/ParentPortal";
-import AuditTrail from "./pages/AuditTrail";
-import Bilan from "./pages/Bilan";
-import Dashboard from "./pages/Dashboard";
-import Encais from "./pages/Encais";
-import Expenses from "./pages/Expenses";
 import Login from "./pages/Login";
-import PaymentRegister from "./pages/PaymentRegister";
-import Students from "./pages/Students";
-import Teachers from "./pages/Teachers";
+
+// Écrans chargés à la demande. Un comptable qui saisit des encaissements n'a pas à
+// télécharger la bibliothèque de graphiques du tableau de bord, ni le module de paie.
+const Arrears = lazy(() => import("./pages/Arrears"));
+const AuditTrail = lazy(() => import("./pages/AuditTrail"));
+const Bilan = lazy(() => import("./pages/Bilan"));
+const Dashboard = lazy(() => import("./pages/Dashboard"));
+const DataImport = lazy(() => import("./pages/DataImport"));
+const Encais = lazy(() => import("./pages/Encais"));
+const Expenses = lazy(() => import("./pages/Expenses"));
+const ParentPortal = lazy(() => import("./pages/portal/ParentPortal"));
+const PaymentRegister = lazy(() => import("./pages/PaymentRegister"));
+const Payroll = lazy(() => import("./pages/Payroll"));
+const Students = lazy(() => import("./pages/Students"));
+const Teachers = lazy(() => import("./pages/Teachers"));
 
 import "./index.css";
 
@@ -31,13 +34,20 @@ import "./index.css";
  */
 function Guarded({ resource, children }: { resource: string; children: ReactNode }) {
   const { can } = useAuth();
-  return can(resource, "view") ? <>{children}</> : <Navigate to="/" replace />;
+  if (!can(resource, "view")) return <Navigate to="/" replace />;
+  return <Suspense fallback={<div className="spinner">Chargement…</div>}>{children}</Suspense>;
 }
 
 /** La page d'accueil dépend du rôle : chacun arrive sur ce qu'il utilise. */
 function Home() {
   const { can } = useAuth();
-  if (can("report", "view")) return <Dashboard />;
+  if (can("report", "view")) {
+    return (
+      <Suspense fallback={<div className="spinner">Chargement…</div>}>
+        <Dashboard />
+      </Suspense>
+    );
+  }
   if (can("monthlypayment", "view")) return <Navigate to="/encaissements" replace />;
   return <Navigate to="/eleves" replace />;
 }
@@ -48,7 +58,13 @@ function Root() {
   if (loading) return <div className="spinner">Chargement…</div>;
 
   // Un parent n'entre jamais dans l'administration : son interface est le portail.
-  if (profile?.role === "PARENT") return <ParentPortal />;
+  if (profile?.role === "PARENT") {
+    return (
+      <Suspense fallback={<div className="spinner">Chargement…</div>}>
+        <ParentPortal />
+      </Suspense>
+    );
+  }
   if (!profile) return <Login />;
 
   return (

@@ -1,6 +1,7 @@
 import { NavLink, Outlet } from "react-router-dom";
 
 import { useAuth } from "../auth";
+import ThemeToggle from "./ThemeToggle";
 
 const ROLE_LABELS: Record<string, string> = {
   SUPER_ADMIN: "Super administrateur",
@@ -91,6 +92,9 @@ export default function Layout() {
           <div className="who">
             <strong>{profile?.full_name || profile?.email}</strong>
             {ROLE_LABELS[profile?.role ?? ""] ?? profile?.role}
+          </div>
+          <div style={{ marginBottom: 8 }}>
+            <ThemeToggle />
           </div>
           <button type="button" className="ghost" onClick={logout}>
             Se déconnecter

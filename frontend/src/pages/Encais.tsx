@@ -1,5 +1,6 @@
 import { api, money } from "../api";
 import { useAuth } from "../auth";
+import { abbreviateMonth } from "../components/charts";
 import { useResource } from "../hooks";
 import type { Period, Series } from "../types";
 
@@ -30,7 +31,7 @@ export default function Encais() {
   if (error) return <div className="alert error">{error}</div>;
   if (!data) return null;
 
-  const months = data.periods.map((period) => period.label.split(" ")[0].slice(0, 4));
+  const months = data.periods.map((period) => abbreviateMonth(period.label));
   const columns = months.length + 4;
 
   return (

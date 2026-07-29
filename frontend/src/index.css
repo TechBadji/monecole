@@ -590,3 +590,201 @@ button.small { padding: 4px 10px; font-size: 12px; }
   text-align: center;
   font-variant-numeric: tabular-nums;
 }
+
+/* ---------- Palette de visualisation ----------
+   Slots catégoriels issus du palette de référence validé (voir dataviz) :
+   chaque paire adjacente tient ΔE ≥ 8 en vision déficiente et ≥ 15 en vision
+   normale, dans les deux modes. Les valeurs sombres ne sont pas un inversement
+   automatique : ce sont les mêmes teintes recalées sur la surface sombre.
+
+   Contrainte à respecter : l'aqua passe sous 3:1 de contraste en mode clair.
+   Les graphiques qui l'emploient portent donc des étiquettes visibles en bout de
+   série — la couleur seule ne suffit pas à lire la valeur. */
+:root {
+  --series-1: #2a78d6;   /* bleu   */
+  --series-2: #eb6834;   /* orange */
+  --series-3: #1baf7a;   /* aqua   */
+  --grid: #e8eaee;
+  --chart-surface: #ffffff;
+}
+
+/* ---------- Mode sombre ----------
+   Toute la feuille passe par des variables : le mode sombre se résume donc à les
+   redéclarer. Le sélecteur `:not([data-theme="light"])` laisse un choix explicite
+   de l'utilisateur primer sur le réglage du système, dans les deux sens. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #141416;
+    --surface: #1e1e21;
+    --border: #32323a;
+    --text: #f2f2f3;
+    --muted: #a0a0ab;
+    --brand: #4a6da8;
+    --brand-soft: #262a35;
+    --positive: #4cae7a;
+    --negative: #e8756a;
+    --warning: #d99a4e;
+    --shadow: 0 1px 2px rgb(0 0 0 / 30%), 0 1px 3px rgb(0 0 0 / 20%);
+
+    --series-1: #3987e5;
+    --series-2: #d95926;
+    --series-3: #199e70;
+    --grid: #2c2c33;
+    --chart-surface: #1e1e21;
+  }
+}
+
+:root[data-theme="dark"] {
+  --bg: #141416;
+  --surface: #1e1e21;
+  --border: #32323a;
+  --text: #f2f2f3;
+  --muted: #a0a0ab;
+  --brand: #4a6da8;
+  --brand-soft: #262a35;
+  --positive: #4cae7a;
+  --negative: #e8756a;
+  --warning: #d99a4e;
+  --shadow: 0 1px 2px rgb(0 0 0 / 30%), 0 1px 3px rgb(0 0 0 / 20%);
+
+  --series-1: #3987e5;
+  --series-2: #d95926;
+  --series-3: #199e70;
+  --grid: #2c2c33;
+  --chart-surface: #1e1e21;
+}
+
+/* En mode sombre, les fonds clairs codés en dur des tableaux et alertes doivent
+   suivre — sinon ils deviennent des blocs blancs aveuglants. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) th,
+  :root:not([data-theme="light"]) tbody tr:hover,
+  :root:not([data-theme="light"]) tr.section td,
+  :root:not([data-theme="light"]) tr.section .sticky-col,
+  :root:not([data-theme="light"]) th.sticky-col { background: #26262b; }
+  :root:not([data-theme="light"]) .alert.error   { background: #33201e; }
+  :root:not([data-theme="light"]) .alert.success { background: #1b2c22; }
+  :root:not([data-theme="light"]) .alert.warning { background: #33291a; }
+  :root:not([data-theme="light"]) .badge.paid    { background: #1b2c22; }
+  :root:not([data-theme="light"]) .badge.partial { background: #33291a; }
+  :root:not([data-theme="light"]) .badge.unpaid  { background: #33201e; }
+  :root:not([data-theme="light"]) .sync-banner.warning { background: #33291a; }
+  :root:not([data-theme="light"]) .sync-banner.success { background: #1b2c22; }
+  :root:not([data-theme="light"]) .sync-banner.error   { background: #33201e; }
+}
+
+:root[data-theme="dark"] th,
+:root[data-theme="dark"] tbody tr:hover,
+:root[data-theme="dark"] tr.section td,
+:root[data-theme="dark"] tr.section .sticky-col,
+:root[data-theme="dark"] th.sticky-col { background: #26262b; }
+:root[data-theme="dark"] .alert.error   { background: #33201e; }
+:root[data-theme="dark"] .alert.success { background: #1b2c22; }
+:root[data-theme="dark"] .alert.warning { background: #33291a; }
+:root[data-theme="dark"] .badge.paid    { background: #1b2c22; }
+:root[data-theme="dark"] .badge.partial { background: #33291a; }
+:root[data-theme="dark"] .badge.unpaid  { background: #33201e; }
+
+/* ---------- Graphiques ---------- */
+
+.chart {
+  position: relative;
+  width: 100%;
+}
+
+.chart svg { display: block; width: 100%; height: auto; overflow: visible; }
+
+.chart-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+  flex-wrap: wrap;
+}
+
+.chart-legend {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.chart-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.legend-key {
+  width: 12px;
+  height: 3px;
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+
+.legend-key.dot { width: 9px; height: 9px; border-radius: 50%; }
+
+.chart-tooltip {
+  position: absolute;
+  pointer-events: none;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgb(0 0 0 / 12%);
+  padding: 8px 10px;
+  font-size: 12px;
+  z-index: 5;
+  min-width: 130px;
+}
+
+.chart-tooltip .tip-title {
+  font-weight: 600;
+  margin-bottom: 5px;
+  color: var(--text);
+}
+
+.chart-tooltip .tip-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  justify-content: space-between;
+  color: var(--muted);
+}
+
+.chart-tooltip .tip-row b {
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+.tick { font-size: 10.5px; fill: var(--muted); }
+.axis-line { stroke: var(--grid); stroke-width: 1; }
+.grid-line { stroke: var(--grid); stroke-width: 1; }
+.crosshair { stroke: var(--muted); stroke-width: 1; opacity: 0.45; }
+.series-label { font-size: 10.5px; font-weight: 600; fill: var(--muted); }
+
+.chart-toggle {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--muted);
+  font-size: 11.5px;
+  text-decoration: underline;
+  cursor: pointer;
+  font-weight: 500;
+}
+
+.theme-toggle {
+  background: transparent;
+  border: 1px solid rgb(255 255 255 / 22%);
+  color: rgb(255 255 255 / 80%);
+  padding: 5px 10px;
+  font-size: 12px;
+  border-radius: 6px;
+  width: 100%;
+  text-align: left;
+}
+
+.theme-toggle:hover { color: #fff; border-color: rgb(255 255 255 / 40%); }

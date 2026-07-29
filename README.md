@@ -382,6 +382,45 @@ employé reste reproductible même si le salaire ou le barème changent ensuite.
 
 ---
 
+## Graphiques et thème
+
+Les graphiques sont écrits en **SVG natif**, sans bibliothèque. Recharts pesait
+114 Ko compressés pour deux formes élémentaires — hors de proportion sur un produit
+destiné à des réseaux mobiles. Le module complet en fait 2,8 Ko.
+
+Le palette catégoriel est le palette de référence validé : chaque paire adjacente
+tient ΔE ≥ 8 en vision déficiente et ≥ 15 en vision normale, dans les deux modes.
+Il a été **vérifié par script**, pas à l'œil.
+
+Trois choix qui ne sont pas affaire de goût :
+
+- **Deux graphiques plutôt qu'un** pour les flux mensuels et le solde cumulé. Les
+  flux tournent autour de 2 M, le cumul grimpe vers 6 M ; les superposer écraserait
+  les premiers au bas du cadre. Deux échelles sur un même graphique ne sont jamais
+  la réponse.
+- **Une seule teinte** pour le classement des dépenses. Colorer chaque barre
+  différemment ferait porter à la couleur un *rang*, alors qu'elle doit désigner une
+  *entité*.
+- **Légende et libellé direct** sur les séries multiples : l'identité ne repose
+  jamais sur la couleur seule. Une vue tableau est accessible sur chaque graphique.
+
+L'application est **bi-mode** (clair, sombre, ou suivi du système). Les valeurs
+sombres ne sont pas un inversement automatique : ce sont les mêmes teintes recalées
+sur la surface sombre, et validées comme telles.
+
+### Poids du chargement
+
+| | Avant | Après |
+|---|---|---|
+| Chargement initial | 690 Ko (201 Ko gz) | **250 Ko (81 Ko gz)** |
+| Écran supplémentaire | — | 2 à 8 Ko |
+| Tableau de bord complet | 690 Ko | **261 Ko (85 Ko gz)** |
+
+Les écrans sont chargés à la demande ; React et le routeur sont isolés dans leurs
+propres fragments, pour qu'une mise à jour applicative n'invalide pas leur cache.
+
+---
+
 ## Mode hors ligne (PWA)
 
 Conçu pour les coupures de réseau, fréquentes en usage réel.
