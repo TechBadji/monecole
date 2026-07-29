@@ -179,25 +179,68 @@ class MatriculeSequenceTests(TestCase):
 
 
 class RouteDeclarationTests(TestCase):
-    """Toute vue d'API doit déclarer la ressource qui la gouverne.
+    """Toute vue d'API est soit gouvernée par un rôle, soit explicitement publique.
 
-    Sans `resource`, `RoleBasedPermission` refuse l'accès — c'est le comportement
-    voulu, mais mieux vaut le détecter ici qu'en production.
+    Une vue sans `resource` est refusée par `RoleBasedPermission` — le bon
+    comportement, mais qui se manifeste en production par un 403 incompréhensible.
+    Ce test force le choix à être conscient : déclarer une ressource, ou déclarer
+    `AllowAny`. L'oubli, lui, est signalé ici.
+
+    Les vues publiques légitimes sont celles qu'un tiers non authentifié doit
+    pouvoir atteindre : demande de code SMS par un parent, webhook du prestataire
+    de paiement. Chacune porte sa propre protection — limitation de débit pour les
+    premières, signature HMAC pour la seconde.
     """
 
-    def test_all_api_views_declare_a_resource(self):
-        undeclared = []
+    def api_views(self):
         for pattern in get_resolver().url_patterns:
             for route in getattr(pattern, "url_patterns", []):
-                callback = getattr(route, "callback", None)
-                view_class = getattr(callback, "cls", None)
-                if view_class is None or not str(route.pattern).startswith(""):
+                view_class = getattr(getattr(route, "callback", None), "cls", None)
+                if view_class is None:
                     continue
-                module = view_class.__module__
-                if not module.startswith("apps."):
-                    continue
-                if not hasattr(view_class, "resource") and view_class.__name__ not in {
-                    "LoginView", "MeView", "TokenRefreshView", "TokenVerifyView",
-                }:
-                    undeclared.append(f"{module}.{view_class.__name__}")
-        self.assertEqual(sorted(set(undeclared)), [])
+                if view_class.__module__.startswith("apps."):
+                    yield view_class
+
+    def test_every_view_is_role_gated_or_explicitly_public(self):
+        from rest_framework.permissions import AllowAny
+
+        undeclared = []
+        for view_class in self.api_views():
+            if hasattr(view_class, "resource"):
+                continue
+            permissions = getattr(view_class, "permission_classes", [])
+            if AllowAny in permissions:
+                continue
+            # `LoginView` et `MeView` s'appuient sur l'authentification seule.
+            if view_class.__name__ in {"LoginView", "MeView"}:
+                continue
+            undeclared.append(f"{view_class.__module__}.{view_class.__name__}")
+
+        self.assertEqual(
+            sorted(set(undeclared)), [],
+            "Ces vues ne déclarent ni `resource` ni `AllowAny` — elles répondront "
+            "403 sans explication.",
+        )
+
+    def test_public_views_are_a_short_known_list(self):
+        """La surface non authentifiée doit rester petite et surveillée.
+
+        Ce test échoue dès qu'une vue publique est ajoutée. C'est voulu : chaque
+        ajout mérite une revue, pas un passage silencieux.
+        """
+        from rest_framework.permissions import AllowAny
+
+        public = {
+            view.__name__
+            for view in self.api_views()
+            if AllowAny in getattr(view, "permission_classes", [])
+        }
+        self.assertEqual(
+            public,
+            {
+                "ParentOtpRequestView",    # limité en débit, ne révèle rien
+                "ParentOtpVerifyView",     # code à usage unique, verrouillé
+                "WaveWebhookView",         # signature HMAC obligatoire
+                "SimulatedWaveCheckoutView",  # refusé hors DEBUG
+            },
+        )

@@ -45,6 +45,8 @@ const SECTIONS: { group: string; links: NavLinkSpec[] }[] = [
     group: "Administration",
     links: [
       { to: "/enseignants", label: "Enseignants", resource: "teacher" },
+      { to: "/paie", label: "Bulletins de paie", resource: "salary" },
+      { to: "/import", label: "Import de données", resource: "dataimport" },
       { to: "/journal", label: "Journal d'audit", resource: "auditlog" },
     ],
   },

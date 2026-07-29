@@ -45,6 +45,9 @@ class Family(TenantScopedModel):
     name = models.CharField("nom de famille", max_length=150)
     primary_contact = models.CharField("contact principal", max_length=150)
     phone = models.CharField("téléphone", max_length=30, blank=True)
+    phone_e164 = models.CharField(
+        "téléphone normalisé", max_length=20, blank=True, db_index=True, editable=False
+    )
     email = models.EmailField(blank=True)
     address = models.CharField("adresse", max_length=255, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -56,6 +59,12 @@ class Family(TenantScopedModel):
 
     def __str__(self):
         return self.name
+
+    def save(self, *args, **kwargs):
+        from apps.notifications.sms import normalize_phone
+
+        self.phone_e164 = normalize_phone(self.phone) if self.phone else ""
+        return super().save(*args, **kwargs)
 
 
 class StudentStatus(models.TextChoices):
@@ -88,6 +97,16 @@ class Student(TenantScopedModel):
     )
     parent_name = models.CharField("parent / tuteur", max_length=150, blank=True)
     parent_phone = models.CharField("téléphone du parent", max_length=30, blank=True)
+    parent_phone_e164 = models.CharField(
+        "téléphone normalisé",
+        max_length=20,
+        blank=True,
+        db_index=True,
+        editable=False,
+        help_text="Forme « 221XXXXXXXXX », dérivée de parent_phone. Sert au "
+        "rattachement du portail parent : les numéros sont saisis dans des "
+        "formats trop variés pour être comparés tels quels.",
+    )
     parent_email = models.EmailField("email du parent", blank=True)
     address = models.CharField("adresse", max_length=255, blank=True)
     enrollment_date = models.DateField("date d'inscription", null=True, blank=True)
@@ -113,6 +132,12 @@ class Student(TenantScopedModel):
     @property
     def is_active(self):
         return self.status == StudentStatus.ACTIVE
+
+    def save(self, *args, **kwargs):
+        from apps.notifications.sms import normalize_phone
+
+        self.parent_phone_e164 = normalize_phone(self.parent_phone) if self.parent_phone else ""
+        return super().save(*args, **kwargs)
 
 
 class ClassEnrollmentHistory(TenantScopedModel):

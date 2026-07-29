@@ -66,7 +66,10 @@ monecole/
 │       ├── staff/            enseignants, contrats, rubriques salariales, paie
 │       ├── finance/          rubriques de charge, dépenses, autres produits
 │       └── reports/          ENCAIS, Rapport Bilan, exports PDF/Excel
-├── frontend/                 React 18 + TypeScript + Vite
+│       ├── notifications/    SMS LaFricaMobile, codes de connexion, rappels
+│       └── payments/         Wave Checkout, webhook, espèces, reçus
+├── frontend/                 React 18 + TypeScript + Vite (PWA)
+│   └── src/offline/          file IndexedDB, synchronisation, cache horodaté
 └── docs/
     ├── modele-excel.md       modèle extrait du classeur + écarts documentés
     └── modele-source.xlsx    classeur d'origine
@@ -168,7 +171,7 @@ comparer. Le jour où un classeur réellement renseigné sera disponible, il pou
 cd backend && .venv/bin/python manage.py test
 ```
 
-82 tests, répartis ainsi :
+172 tests, répartis ainsi :
 
 | Fichier | Objet |
 |---|---|
@@ -178,6 +181,10 @@ cd backend && .venv/bin/python manage.py test
 | `core/tests/test_api_contract.py` | Garde-fous d'API, séquence des matricules |
 | `reports/tests/test_services.py` | Calculs financiers et régressions B1 à B4 |
 | `reports/tests/test_performance.py` | Bilan de 500 élèves sous 5 secondes |
+| `notifications/tests/test_portal.py` | Codes SMS, énumération, cloisonnement du portail parent |
+| `payments/tests/test_payments.py` | Signature Wave, rejeu, idempotence, espèces |
+| `core/tests/test_imports.py` | Analyse CSV, pré-contrôle, atomicité |
+| `staff/tests/test_payroll.py` | Barème sénégalais vérifié à la main, bulletins |
 
 Les calculs financiers sont vérifiés contre des valeurs posées à la main dans le
 test, et non contre une seconde implémentation du même calcul — sinon une erreur de
@@ -243,6 +250,163 @@ résulter d'une simple écriture de données.
   comptable requiert la validation d'un administrateur, et n'entre au bilan
   qu'une fois validée.
 - En production : HSTS, cookies sécurisés, redirection SSL.
+
+---
+
+## Intégrations
+
+### SMS — LaFricaMobile (LAMPUSH)
+
+Client transposé de `lib/sms.ts` du projet **gynaeasy**, dont la logique est
+conservée : normalisation des numéros sénégalais en `221XXXXXXXXX`, tolérance aux
+deux formes de réponse de LAM (JSON ou identifiant brut), et **mode simulation**
+quand les identifiants manquent — l'application reste utilisable de bout en bout
+sans consommer de crédit.
+
+```bash
+LAM_ACCESS_KEY=…        # vide = simulation
+LAM_ACCESS_PASSWORD=…
+LAM_SENDER_ID=MonEcole
+```
+
+Tout envoi est consigné dans la boîte d'envoi (`/api/notifications/outbox/`),
+**succès comme échec** : sans cette trace, impossible de répondre à un parent qui
+affirme n'avoir jamais été relancé.
+
+> Les messages sont tenus sous 160 caractères. Au-delà, l'opérateur découpe et
+> facture chaque segment — vingt caractères de trop doublent le coût d'une campagne
+> de 400 parents.
+
+### Rappels de paiement
+
+```bash
+python manage.py send_reminders --dry-run              # prévisualisation
+python manage.py send_reminders --min-amount 20000     # envoi réel
+```
+
+Idempotent à la journée : une campagne déjà passée n'est pas rejouée. Un `cron` qui
+double, un redémarrage ou un clic de trop ne coûtent pas un second SMS à chaque
+parent. `--dry-run` est le mode par défaut de l'endpoint `/api/reminders/arrears/`.
+
+### Paiements — Wave et espèces
+
+`PaymentTransaction` est distincte de `MonthlyPayment` : une transaction peut être
+ouverte, abandonnée ou échouée sans jamais produire d'écriture comptable. Confondre
+les deux ferait apparaître au bilan des paiements jamais reçus.
+
+- **Wave** : session Checkout, puis confirmation par webhook signé. La signature
+  HMAC est **obligatoire** — sans `WAVE_WEBHOOK_SECRET`, le webhook est refusé
+  plutôt qu'accepté par défaut. Fenêtre de tolérance de 5 minutes sur l'horodatage,
+  pour qu'une signature capturée ne reste pas rejouable.
+- **Espèces** : confirmé immédiatement au guichet, réservé au comptable et à
+  l'administrateur.
+- Reçu PDF au format A5 (deux par feuille A4). Une transaction simulée produit un
+  reçu portant la mention « DOCUMENT DE TEST ».
+
+Un règlement en plusieurs versements **s'ajoute** au montant déjà encaissé.
+
+---
+
+## Portail parent
+
+Authentification par **numéro de téléphone et code SMS à 6 chiffres**, valable
+10 minutes. Aucun mot de passe : le numéro figure déjà dans la fiche de l'élève.
+
+Le code n'est pas stocké en clair — seule une empreinte SHA-256 liant le code au
+numéro l'est. Un code intercepté ne vaut donc que pour la ligne qui l'a reçu, et
+une fuite de la table ne permet pas de se connecter.
+
+Le compte parent est créé au premier accès réussi : aucun provisionnement manuel.
+Le périmètre visible découle du numéro rapproché des fiches élèves — jamais d'un
+identifiant fourni par le client.
+
+**Points durcis, chacun couvert par un test :**
+
+| Risque | Traitement |
+|---|---|
+| Énumération des parents d'une école | La demande de code répond la même chose pour un numéro connu et inconnu |
+| Force brute sur le code | Verrouillage après 5 tentatives, 5 demandes par heure et par IP |
+| Code réutilisé | Usage unique ; une nouvelle demande invalide la précédente |
+| Même numéro dans deux écoles | Le rattachement est par établissement, pas par numéro seul |
+| Accès à l'administration | Bilan, dépenses, paie, bulletins : tous en 403 |
+
+---
+
+## Import CSV de migration
+
+Deux principes, tous deux testés :
+
+1. **Pré-contrôle systématique.** `dry_run` est le défaut, et un paramètre absent
+   ou mal orthographié ne déclenche jamais d'écriture. Le rapport situe chaque
+   erreur à son numéro de ligne *tel qu'il apparaît dans Excel*.
+2. **Tout ou rien.** Une seule ligne en erreur et rien n'est appliqué. Un import à
+   moitié passé laisse la base dans un état pire que le point de départ.
+
+Les fichiers réels sortent d'Excel : l'encodage (UTF-8, BOM, Windows-1252,
+Latin-1) et le séparateur (`;` ou `,`) sont détectés. Les montants sont lus dans
+toutes leurs formes — `15 000`, `15.000`, `15 000,00`, `15 000 FCFA`.
+
+> Le franc CFA n'ayant pas de décimale, un point suivi de trois chiffres est
+> nécessairement un séparateur de milliers : `15.000` vaut quinze mille, pas quinze.
+
+---
+
+## Bulletins de paie — schéma sénégalais
+
+```
+Brut imposable
+  − IPRES régime général (5,6 %, assiette plafonnée à 432 000)
+  − IPRES cadres         (2,4 %, plafond 1 296 000)     si cadre
+= Brut après cotisations
+  − abattement frais professionnels (30 %, plafonné à 900 000 / an)
+= Net imposable
+  − IR au barème progressif annuel (0 / 20 / 30 / 35 / 37 / 40 %)
+    − réduction pour charges de famille (1 à 5 parts, plancher et plafond)
+  − TRIMF (forfait annuel par tranche)
+= Net à payer  (+ indemnités non imposables)
+
+Charges patronales : IPRES 8,4 % (+ 3,6 % cadres), CSS 7 % + AT 1 % (plafond 63 000)
+```
+
+**Les barèmes sont stockés en base (`PayrollScale`), datés et modifiables sans
+redéploiement** — IPRES, CSS, IR et TRIMF relèvent de la loi de finances. Conserver
+l'historique permet de recalculer un bulletin de l'exercice précédent à l'identique.
+
+> ⚠️ Les valeurs livrées sont des **valeurs par défaut non validées**. Tant que
+> `validated_by` est vide, l'API le signale, l'interface affiche un avertissement et
+> le PDF porte la mention « non validé par un expert-comptable ». Faites vérifier
+> les taux avant de remettre des bulletins réels.
+
+Le détail du calcul est figé sur le bulletin à l'émission : un document remis à un
+employé reste reproductible même si le salaire ou le barème changent ensuite.
+
+---
+
+## Mode hors ligne (PWA)
+
+Conçu pour les coupures de réseau, fréquentes en usage réel.
+
+| Magasin | Rôle |
+|---|---|
+| `queue` (IndexedDB) | Écritures faites hors ligne. **Donnée irremplaçable** — elle n'existe nulle part ailleurs. |
+| `cache` (IndexedDB) | Copies de lecture **horodatées**. Reconstructibles, mais la fraîcheur doit être affichée. |
+| Service worker | Coquille applicative seulement (HTML, JS, CSS). |
+
+**Le service worker n'intercepte jamais `/api/`.** S'il mettait les réponses de
+l'API en cache, il les servirait comme des réponses normales et l'interface ne
+saurait pas qu'elles sont périmées — exactement le piège à éviter sur des données
+financières.
+
+Synchronisation à la reconnexion : séquentielle (l'ordre d'arrivée est préservé),
+verrouillée (un seul passage à la fois), et distinguant l'erreur métier de l'erreur
+réseau. Un 4xx est définitif — l'entrée est signalée pour intervention humaine
+plutôt que rejouée en boucle. Chaque écriture porte un `X-Client-Mutation-Id`, ce
+qui rend le rejeu sûr après une coupure survenue *pendant* l'envoi.
+
+Couverture hors ligne : saisie des encaissements, saisie des dépenses, consultation
+des élèves et des états financiers. **Toute donnée issue du cache porte un bandeau
+daté** — sur les états financiers, avec date et heure précises : « il y a 3 h » est
+trop vague pour décider si un chiffre est exploitable.
 
 ---
 

@@ -27,6 +27,8 @@ INSTALLED_APPS = [
     "apps.staff",
     "apps.finance",
     "apps.reports",
+    "apps.notifications",
+    "apps.payments",
 ]
 
 MIDDLEWARE = [
@@ -114,7 +116,12 @@ REST_FRAMEWORK = {
     "DEFAULT_THROTTLE_CLASSES": (
         "rest_framework.throttling.ScopedRateThrottle",
     ),
-    "DEFAULT_THROTTLE_RATES": {"login": "10/min"},
+    "DEFAULT_THROTTLE_RATES": {
+        "login": "10/min",
+        # L'envoi d'un code coûte un SMS : on borne les demandes par numéro.
+        "otp": "5/hour",
+        "sms": "20/min",
+    },
 }
 
 SIMPLE_JWT = {
@@ -141,6 +148,22 @@ CORS_ALLOWED_ORIGINS = [
 # subdivision décimale : tous les montants sont manipulés en unités entières.
 DEFAULT_CURRENCY = os.getenv("DEFAULT_CURRENCY", "XOF")
 DEFAULT_COUNTRY = os.getenv("DEFAULT_COUNTRY", "SN")
+
+# --- Intégrations ------------------------------------------------------------
+# SMS : LaFricaMobile (LAMPUSH). Sans identifiants, `apps.notifications.sms` bascule
+# en mode simulation — l'application reste utilisable de bout en bout sans
+# consommer de crédit.
+LAM_ACCESS_KEY = os.getenv("LAM_ACCESS_KEY", "")
+LAM_ACCESS_PASSWORD = os.getenv("LAM_ACCESS_PASSWORD", "")
+LAM_SENDER_ID = os.getenv("LAM_SENDER_ID", "MonEcole")
+
+# Paiement : Wave Business API. Même principe de repli en simulation.
+WAVE_API_KEY = os.getenv("WAVE_API_KEY", "")
+WAVE_WEBHOOK_SECRET = os.getenv("WAVE_WEBHOOK_SECRET", "")
+WAVE_API_URL = os.getenv("WAVE_API_URL", "https://api.wave.com/v1")
+
+# Base publique utilisée pour les retours de paiement et les liens envoyés par SMS.
+PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "http://localhost:5173")
 
 # --- Sécurité (production) ---------------------------------------------------
 if not DEBUG:

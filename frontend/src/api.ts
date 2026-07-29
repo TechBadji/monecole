@@ -88,14 +88,19 @@ async function refreshAccessToken(): Promise<boolean> {
   }
 }
 
-type RequestOptions = { method?: string; body?: unknown; raw?: boolean };
+type RequestOptions = {
+  method?: string;
+  body?: unknown;
+  raw?: boolean;
+  headers?: Record<string, string>;
+};
 
 export async function request<T = unknown>(
   path: string,
-  { method = "GET", body, raw = false }: RequestOptions = {},
+  { method = "GET", body, raw = false, headers: extra }: RequestOptions = {},
 ): Promise<T> {
   const send = () => {
-    const headers: Record<string, string> = {};
+    const headers: Record<string, string> = { ...extra };
     if (body !== undefined) headers["Content-Type"] = "application/json";
     const access = tokens.access;
     if (access) headers.Authorization = `Bearer ${access}`;

@@ -2,6 +2,7 @@ from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 from rest_framework_simplejwt.views import TokenRefreshView, TokenVerifyView
 
+from .import_views import DataImportView
 from .views import (
     AuditLogViewSet,
     LoginView,
@@ -26,5 +27,6 @@ urlpatterns = [
     path("auth/refresh/", TokenRefreshView.as_view(), name="token_refresh"),
     path("auth/verify/", TokenVerifyView.as_view(), name="token_verify"),
     path("auth/me/", MeView.as_view(), name="me"),
+    path("imports/", DataImportView.as_view(), name="data-import"),
     path("", include(router.urls)),
 ]

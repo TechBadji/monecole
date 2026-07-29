@@ -45,6 +45,8 @@ MATRIX = {
     "salary": {Role.ADMIN: ALL, Role.ACCOUNTANT: WRITE, Role.SECRETARY: READ},
     # --- Restitution ------------------------------------------------------
     "report": {Role.ADMIN: READ, Role.ACCOUNTANT: READ},
+    # --- Migration de données ---------------------------------------------
+    "dataimport": {Role.ADMIN: ALL, Role.SECRETARY: WRITE},
 }
 
 # Correspondance méthode HTTP -> action.

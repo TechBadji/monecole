@@ -1,6 +1,16 @@
 from rest_framework import serializers
 
-from .models import Absence, Salary, SalaryRaise, SalaryRubric, Teacher, TeacherContract
+from .models import (
+    Absence,
+    PayrollProfile,
+    PayrollScale,
+    Payslip,
+    Salary,
+    SalaryRaise,
+    SalaryRubric,
+    Teacher,
+    TeacherContract,
+)
 
 
 class TeacherSerializer(serializers.ModelSerializer):
@@ -86,3 +96,46 @@ class SalaryRaiseSerializer(serializers.ModelSerializer):
             "id", "teacher", "effective_date", "previous_amount",
             "new_amount", "reason", "approved_by",
         ]
+
+
+class PayrollScaleSerializer(serializers.ModelSerializer):
+    is_validated = serializers.BooleanField(read_only=True)
+
+    class Meta:
+        model = PayrollScale
+        fields = [
+            "id", "label", "effective_from", "values",
+            "validated_by", "is_validated", "notes", "created_at",
+        ]
+
+
+class PayrollProfileSerializer(serializers.ModelSerializer):
+    teacher_name = serializers.CharField(source="teacher.full_name", read_only=True)
+    matricule = serializers.CharField(source="teacher.matricule", read_only=True)
+    gross = serializers.IntegerField(read_only=True)
+
+    class Meta:
+        model = PayrollProfile
+        fields = [
+            "id", "teacher", "teacher_name", "matricule", "base_salary",
+            "taxable_bonus", "non_taxable_allowance", "gross", "is_executive",
+            "family_shares", "social_security_number", "bank_account",
+        ]
+
+
+class PayslipSerializer(serializers.ModelSerializer):
+    teacher_name = serializers.CharField(source="teacher.full_name", read_only=True)
+    matricule = serializers.CharField(source="teacher.matricule", read_only=True)
+    employer_cost = serializers.IntegerField(read_only=True)
+    scale_validated = serializers.BooleanField(source="scale.is_validated", read_only=True)
+
+    class Meta:
+        model = Payslip
+        fields = [
+            "id", "teacher", "teacher_name", "matricule", "year", "scale",
+            "scale_validated", "period", "gross", "non_taxable",
+            "employee_contributions", "employer_contributions", "income_tax",
+            "trimf", "other_deductions", "net_pay", "employer_cost",
+            "computation", "paid_at", "created_at",
+        ]
+        read_only_fields = fields

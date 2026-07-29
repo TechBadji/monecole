@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 
-import { api, money } from "../api";
+import { money } from "../api";
 import { useAuth } from "../auth";
-import { useResource } from "../hooks";
+import { StaleBanner } from "../components/OfflineBanners";
+import { mutate, useOfflineResource } from "../offline/useOfflineResource";
 import type { ClassRoom, Paginated, Register, RegisterRow, SchoolYear } from "../types";
 
 type Draft = Record<number, RegisterRow>;
@@ -29,21 +30,25 @@ export default function PaymentRegister() {
   const currency = profile?.school?.currency ?? "XOF";
   const editable = can("monthlypayment", "add");
 
-  const { data: classes } = useResource<Paginated<ClassRoom>>("/classes/");
-  const { data: years } = useResource<Paginated<SchoolYear>>("/school-years/");
+  const classes = useOfflineResource<Paginated<ClassRoom>>("/classes/");
+  const years = useOfflineResource<Paginated<SchoolYear>>("/school-years/");
 
   const [classroom, setClassroom] = useState<number | null>(null);
   const [period, setPeriod] = useState<string>("");
   const [draft, setDraft] = useState<Draft>({});
-  const [status, setStatus] = useState<{ kind: "error" | "success"; text: string } | null>(null);
+  const [status, setStatus] = useState<
+    { kind: "error" | "success" | "queued"; text: string } | null
+  >(null);
   const [saving, setSaving] = useState(false);
 
-  const currentYear = years?.results.find((year) => year.is_current);
+  const currentYear = years.data?.results.find((year) => year.is_current);
   const periods = useMemo(() => periodOptions(currentYear), [currentYear]);
 
   useEffect(() => {
-    if (classroom === null && classes?.results.length) setClassroom(classes.results[0].id);
-  }, [classes, classroom]);
+    if (classroom === null && classes.data?.results.length) {
+      setClassroom(classes.data.results[0].id);
+    }
+  }, [classes.data, classroom]);
 
   useEffect(() => {
     if (!period && periods.length) setPeriod(periods[0].value);
@@ -53,7 +58,13 @@ export default function PaymentRegister() {
     classroom && period
       ? `/monthly-payments/register/?classroom=${classroom}&period=${period}`
       : null;
-  const { data: register, loading, reload } = useResource<Register>(path);
+  const {
+    data: register,
+    loading,
+    reload,
+    stale,
+    cachedAt,
+  } = useOfflineResource<Register>(path);
 
   // Le brouillon local repart de l'état serveur à chaque changement de classe ou
   // de mois, pour qu'une saisie non enregistrée ne se reporte pas ailleurs.
@@ -119,15 +130,34 @@ export default function PaymentRegister() {
         return;
       }
 
-      const result = await api.post<{ saved: number; total: number }>(
+      const className =
+        classes.data?.results.find((c) => c.id === classroom)?.name ?? "classe";
+      const periodLabel =
+        periods.find((p) => p.value === period)?.label ?? period;
+
+      const outcome = await mutate(
         "/monthly-payments/bulk/",
         { period, entries },
+        { label: `Encaissements ${className} — ${periodLabel} (${entries.length})` },
       );
-      setStatus({
-        kind: "success",
-        text: `${result.saved} encaissement(s) enregistré(s) — ${money(result.total)} ${currency}.`,
-      });
-      reload();
+
+      if (outcome.queued) {
+        // Hors ligne : la saisie est conservée localement. On le dit explicitement
+        // plutôt que d'afficher un succès qui laisserait croire à un enregistrement.
+        setStatus({
+          kind: "queued",
+          text:
+            `${entries.length} encaissement(s) conservé(s) sur cet appareil. ` +
+            `L'envoi se fera automatiquement au retour du réseau.`,
+        });
+      } else {
+        const result = outcome.response as { saved: number; total: number };
+        setStatus({
+          kind: "success",
+          text: `${result.saved} encaissement(s) enregistré(s) — ${money(result.total)} ${currency}.`,
+        });
+        reload();
+      }
     } catch (caught) {
       setStatus({
         kind: "error",
@@ -158,7 +188,7 @@ export default function PaymentRegister() {
             value={classroom ?? ""}
             onChange={(event) => setClassroom(Number(event.target.value))}
           >
-            {classes?.results.map((item) => (
+            {classes.data?.results.map((item) => (
               <option key={item.id} value={item.id}>
                 {item.name} ({item.student_count})
               </option>
@@ -194,7 +224,16 @@ export default function PaymentRegister() {
         )}
       </div>
 
-      {status && <div className={`alert ${status.kind}`}>{status.text}</div>}
+      <StaleBanner
+        freshness={{ stale, cachedAt }}
+        label="Les montants déjà enregistrés"
+      />
+
+      {status && (
+        <div className={`alert ${status.kind === "queued" ? "warning" : status.kind}`}>
+          {status.text}
+        </div>
+      )}
 
       {loading && <div className="spinner">Chargement…</div>}
 

@@ -230,3 +230,149 @@ class SalaryRaise(TenantScopedModel):
     class Meta:
         verbose_name = "augmentation"
         ordering = ["-effective_date"]
+
+
+class PayrollScale(TenantScopedModel):
+    """Barèmes de paie applicables à partir d'une date.
+
+    Stockés en base et datés plutôt que codés en dur : IPRES, CSS, IR et TRIMF
+    relèvent de la loi de finances et changent d'une année sur l'autre. Recalculer
+    un bulletin de l'exercice précédent doit donner le même résultat qu'à l'époque,
+    ce qui impose de conserver les barèmes historiques plutôt que de les écraser.
+
+    Les valeurs par défaut sont celles du schéma sénégalais courant — elles doivent
+    être validées par un expert-comptable avant tout usage réel.
+    """
+
+    label = models.CharField("libellé", max_length=100, help_text="Par exemple : Barème 2026")
+    effective_from = models.DateField("applicable à partir du")
+    values = models.JSONField("barèmes", default=dict)
+    validated_by = models.CharField(
+        "validé par", max_length=150, blank=True,
+        help_text="Expert-comptable ayant vérifié les taux. Vide = non validé.",
+    )
+    notes = models.TextField("notes", blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "barème de paie"
+        verbose_name_plural = "barèmes de paie"
+        ordering = ["-effective_from"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["school", "effective_from"], name="unique_scale_per_date"
+            )
+        ]
+
+    def __str__(self):
+        return f"{self.label} (dès le {self.effective_from:%d/%m/%Y})"
+
+    @property
+    def is_validated(self):
+        return bool(self.validated_by)
+
+    def save(self, *args, **kwargs):
+        if not self.values:
+            from .payroll import default_scale_values
+
+            self.values = default_scale_values()
+        return super().save(*args, **kwargs)
+
+    @classmethod
+    def applicable(cls, date):
+        """Barème en vigueur à une date. Crée le barème par défaut si aucun n'existe."""
+        scale = cls.objects.filter(effective_from__lte=date).order_by("-effective_from").first()
+        if scale is None:
+            scale = cls.objects.order_by("effective_from").first()
+        return scale
+
+
+class PayrollProfile(TenantScopedModel):
+    """Éléments de paie propres à un employé."""
+
+    class FamilyShares(models.TextChoices):
+        S1 = "1", "1 part"
+        S15 = "1.5", "1,5 part"
+        S2 = "2", "2 parts"
+        S25 = "2.5", "2,5 parts"
+        S3 = "3", "3 parts"
+        S35 = "3.5", "3,5 parts"
+        S4 = "4", "4 parts"
+        S45 = "4.5", "4,5 parts"
+        S5 = "5", "5 parts"
+
+    teacher = models.OneToOneField(
+        Teacher, on_delete=models.CASCADE, related_name="payroll_profile"
+    )
+    base_salary = models.PositiveIntegerField("salaire de base mensuel", **MONEY)
+    taxable_bonus = models.PositiveIntegerField("primes imposables", **MONEY)
+    non_taxable_allowance = models.PositiveIntegerField(
+        "indemnités non imposables", **MONEY,
+        help_text="Transport et assimilés, dans la limite d'exonération légale.",
+    )
+    is_executive = models.BooleanField(
+        "cadre", default=False,
+        help_text="Assujettit au régime complémentaire IPRES cadres.",
+    )
+    family_shares = models.CharField(
+        "parts fiscales", max_length=4, choices=FamilyShares.choices, default=FamilyShares.S1
+    )
+    social_security_number = models.CharField("n° de sécurité sociale", max_length=40, blank=True)
+    bank_account = models.CharField("compte bancaire", max_length=40, blank=True)
+
+    class Meta:
+        verbose_name = "profil de paie"
+        verbose_name_plural = "profils de paie"
+        ordering = ["teacher__matricule"]
+
+    def __str__(self):
+        return f"Paie — {self.teacher.full_name}"
+
+    @property
+    def gross(self):
+        return self.base_salary + self.taxable_bonus
+
+
+class Payslip(TenantScopedModel):
+    """Bulletin de paie nominatif d'un mois.
+
+    Le détail du calcul est figé dans `computation` à l'émission. Un bulletin remis
+    à un employé doit rester reproductible à l'identique, même si le barème, le
+    salaire ou les parts fiscales changent ensuite.
+    """
+
+    teacher = models.ForeignKey(Teacher, on_delete=models.PROTECT, related_name="payslips")
+    year = models.ForeignKey(SchoolYear, on_delete=models.PROTECT, related_name="payslips")
+    scale = models.ForeignKey(PayrollScale, on_delete=models.PROTECT, related_name="payslips")
+    period = models.DateField("période", help_text="Dernier jour du mois concerné.")
+
+    gross = models.PositiveIntegerField("brut imposable", **MONEY)
+    non_taxable = models.PositiveIntegerField("indemnités non imposables", **MONEY)
+    employee_contributions = models.PositiveIntegerField("cotisations salariales", **MONEY)
+    employer_contributions = models.PositiveIntegerField("charges patronales", **MONEY)
+    income_tax = models.PositiveIntegerField("impôt sur le revenu", **MONEY)
+    trimf = models.PositiveIntegerField("TRIMF", **MONEY)
+    other_deductions = models.PositiveIntegerField("autres retenues", **MONEY)
+    net_pay = models.PositiveIntegerField("net à payer", **MONEY)
+
+    computation = models.JSONField("détail du calcul", default=dict)
+    paid_at = models.DateField("payé le", null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "bulletin de paie"
+        verbose_name_plural = "bulletins de paie"
+        ordering = ["-period", "teacher__matricule"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["teacher", "period"], name="one_payslip_per_teacher_period"
+            )
+        ]
+        indexes = [models.Index(fields=["school", "year", "period"])]
+
+    def __str__(self):
+        return f"{self.teacher.full_name} — {self.period:%m/%Y}"
+
+    @property
+    def employer_cost(self):
+        return self.gross + self.employer_contributions

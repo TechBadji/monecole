@@ -20,7 +20,7 @@ from apps.core.models import Role, School, SchoolYear, Subscription
 from apps.core.periods import default_year_bounds, end_of_month, month_ends
 from apps.core.tenancy import tenant_context, unscoped
 from apps.finance.models import DEFAULT_EXPENSE_CATEGORIES, Expense, ExpenseCategory, OtherIncome
-from apps.staff.models import Salary, SalaryRubric, Teacher
+from apps.staff.models import PayrollProfile, PayrollScale, Salary, SalaryRubric, Teacher
 from apps.students.models import (
     ClassRoom,
     Enrollment,
@@ -105,10 +105,7 @@ class Command(BaseCommand):
         random.seed(20252026)  # déterminisme : mêmes totaux à chaque exécution
 
         if options["reset"]:
-            with unscoped():
-                School.objects.filter(slug="darou-louqmane").delete()
-                User.objects.filter(school__isnull=True, email="super@monecole.sn").delete()
-            self.stdout.write(self.style.WARNING("École de démonstration supprimée."))
+            self._teardown()
 
         subscription = Subscription.objects.create(
             plan=Subscription.Plan.STANDARD,
@@ -133,6 +130,7 @@ class Command(BaseCommand):
             classrooms = self._create_classes(school, year)
             teachers = self._create_teachers(school)
             self._create_salaries(school, year, teachers)
+            self._create_payroll(school, year, teachers)
             categories = self._create_categories(school)
             self._create_students(school, year, classrooms, options["students"])
             self._create_expenses(school, year, categories)
@@ -141,6 +139,49 @@ class Command(BaseCommand):
         self._summary(school, year)
 
     # ------------------------------------------------------------------ #
+
+    def _teardown(self):
+        """Supprime l'école de démonstration, écritures comprises.
+
+        `School.delete()` ne suffit pas : `SchoolYear` est en cascade depuis
+        l'établissement, mais les écritures qui la référencent (inscriptions,
+        encaissements, dépenses, bulletins) sont en `PROTECT` — c'est voulu, une
+        année scolaire ne doit jamais emporter sa comptabilité par accident. Le
+        nettoyage se fait donc de la feuille vers la racine.
+        """
+        from apps.payments.models import PaymentTransaction
+        from apps.staff.models import Payslip
+
+        with unscoped():
+            school = School.objects.filter(slug="darou-louqmane").first()
+            if school is None:
+                return
+
+            # De la plus dépendante à la moins dépendante.
+            # Écritures d'abord, puis les référentiels qu'elles protègent.
+            from apps.notifications.models import OtpCode, ReminderRun
+            from apps.staff.models import PayrollProfile, PayrollScale
+
+            for model in (
+                PaymentTransaction, Payslip, MonthlyPayment, Enrollment,
+                Expense, OtherIncome, Salary, PayrollProfile, PayrollScale,
+                OtpCode, ReminderRun,
+            ):
+                model.all_objects.filter(school=school).delete()
+
+            # `ClassRoom` et `Teacher` sont protégés par les élèves et le personnel :
+            # on vide donc les uns avant les autres.
+            Student.all_objects.filter(school=school).delete()
+            Family.all_objects.filter(school=school).delete()
+            Teacher.all_objects.filter(school=school).delete()
+            ClassRoom.all_objects.filter(school=school).delete()
+            ExpenseCategory.all_objects.filter(school=school).delete()
+            SchoolYear.all_objects.filter(school=school).delete()
+
+            school.delete()
+            User.objects.filter(school__isnull=True, email="super@monecole.sn").delete()
+
+        self.stdout.write(self.style.WARNING("École de démonstration supprimée."))
 
     def _create_year(self, school, start_year):
         start, end = default_year_bounds(start_year)
@@ -215,6 +256,31 @@ class Command(BaseCommand):
                     social_contributions=monthly[rubric.code] // 10,
                     paid_at=period,
                 )
+
+    def _create_payroll(self, school, year, teachers):
+        """Barème sénégalais par défaut et profils de paie."""
+        PayrollScale.objects.create(
+            school=school,
+            label=f"Barème {year.start_date.year + 1}",
+            effective_from=year.start_date,
+            notes="Valeurs par défaut du schéma sénégalais — à faire valider par un "
+            "expert-comptable avant remise de bulletins réels.",
+        )
+        # Salaires plausibles : direction, enseignants, personnel de service.
+        grid = [
+            (450_000, True), (280_000, False), (280_000, False), (240_000, False),
+            (240_000, False), (200_000, False), (200_000, False), (120_000, False),
+            (100_000, False), (90_000, False),
+        ]
+        for teacher, (base, executive) in zip(teachers, grid):
+            PayrollProfile.objects.create(
+                school=school,
+                teacher=teacher,
+                base_salary=base,
+                non_taxable_allowance=25_000,  # indemnité de transport
+                is_executive=executive,
+                family_shares=random.choice(["1", "1.5", "2", "2.5", "3"]),
+            )
 
     def _create_categories(self, school):
         categories = {}

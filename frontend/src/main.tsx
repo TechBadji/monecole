@@ -4,7 +4,12 @@ import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 
 import { AuthProvider, useAuth } from "./auth";
 import Layout from "./components/Layout";
+import { SyncBanner } from "./components/OfflineBanners";
+import { startSyncWatcher } from "./offline/sync";
 import Arrears from "./pages/Arrears";
+import DataImport from "./pages/DataImport";
+import Payroll from "./pages/Payroll";
+import ParentPortal from "./pages/portal/ParentPortal";
 import AuditTrail from "./pages/AuditTrail";
 import Bilan from "./pages/Bilan";
 import Dashboard from "./pages/Dashboard";
@@ -41,6 +46,9 @@ function Root() {
   const { profile, loading } = useAuth();
 
   if (loading) return <div className="spinner">Chargement…</div>;
+
+  // Un parent n'entre jamais dans l'administration : son interface est le portail.
+  if (profile?.role === "PARENT") return <ParentPortal />;
   if (!profile) return <Login />;
 
   return (
@@ -96,6 +104,22 @@ function Root() {
           }
         />
         <Route
+          path="paie"
+          element={
+            <Guarded resource="salary">
+              <Payroll />
+            </Guarded>
+          }
+        />
+        <Route
+          path="import"
+          element={
+            <Guarded resource="dataimport">
+              <DataImport />
+            </Guarded>
+          }
+        />
+        <Route
           path="enseignants"
           element={
             <Guarded resource="teacher">
@@ -117,11 +141,31 @@ function Root() {
   );
 }
 
+/** Coquille hors ligne. Échec silencieux : l'application marche sans. */
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("/sw.js").catch(() => {
+      console.info("Service worker non enregistré — mode hors ligne indisponible.");
+    });
+  });
+}
+
+startSyncWatcher();
+
+function App() {
+  return (
+    <>
+      <SyncBanner />
+      <Root />
+    </>
+  );
+}
+
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <BrowserRouter>
       <AuthProvider>
-        <Root />
+        <App />
       </AuthProvider>
     </BrowserRouter>
   </StrictMode>,
