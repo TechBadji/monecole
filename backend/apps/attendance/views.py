@@ -48,7 +48,16 @@ class AttendanceSettingsSerializer(serializers.ModelSerializer):
 
 
 class ScanViewSet(TenantViewSetMixin, ViewSet):
-    """Poste de badgeage : un appareil au portail scanne les cartes."""
+    """Point d'entrée de la badgeuse murale.
+
+    L'écran de badgeage a été retiré de l'application : le scan est assuré par un
+    boîtier physique au portail, qui appelle cette API. Le contrat, les cas
+    d'erreur et les questions à poser à l'équipementier sont décrits dans
+    `docs/badgeuse-api.md`.
+
+    L'endpoint reste utilisable depuis un compte du personnel — un agent muni
+    d'un téléphone peut donc dépanner un boîtier en panne.
+    """
 
     resource = "attendance"
 

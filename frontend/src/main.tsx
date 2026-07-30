@@ -12,7 +12,6 @@ import Login from "./pages/Login";
 // télécharger la bibliothèque de graphiques du tableau de bord, ni le module de paie.
 const Arrears = lazy(() => import("./pages/Arrears"));
 const Attendance = lazy(() => import("./pages/Attendance"));
-const Badge = lazy(() => import("./pages/Badge"));
 const Compositions = lazy(() => import("./pages/Compositions"));
 const Grades = lazy(() => import("./pages/Grades"));
 const ReportCards = lazy(() => import("./pages/ReportCards"));
@@ -171,14 +170,6 @@ function Root() {
           element={
             <Guarded resource="reportcard">
               <ReportCards />
-            </Guarded>
-          }
-        />
-        <Route
-          path="badgeage"
-          element={
-            <Guarded resource="attendance">
-              <Badge />
             </Guarded>
           }
         />

@@ -40,7 +40,6 @@ const SECTIONS: { group: string; links: NavLinkSpec[] }[] = [
       { to: "/notes", label: "Saisie des notes", resource: "grade" },
       { to: "/bulletins", label: "Bulletins", resource: "reportcard" },
       { to: "/compositions", label: "Compositions", resource: "composition" },
-      { to: "/badgeage", label: "Badgeage", resource: "attendance" },
       { to: "/assiduite", label: "Assiduité", resource: "attendance" },
     ],
   },

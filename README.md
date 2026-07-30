@@ -72,6 +72,7 @@ monecole/
 │   └── src/offline/          file IndexedDB, synchronisation, cache horodaté
 └── docs/
     ├── modele-excel.md       modèle extrait du classeur + écarts documentés
+    ├── badgeuse-api.md       contrat d'intégration de la badgeuse murale
     └── modele-source.xlsx    classeur d'origine
 ```
 
