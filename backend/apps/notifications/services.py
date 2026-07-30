@@ -7,7 +7,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from apps.core.models import Notification
-from apps.students.models import FeeSchedule, MonthlyPayment, Student, StudentStatus
+from apps.students.models import MonthlyPayment, Student, StudentStatus
 
 from . import templates_sms
 from .models import ReminderRun
@@ -62,16 +62,26 @@ def _parent_name(student):
 def arrears_by_student(year, as_of=None):
     """Arriérés de mensualité par élève, sur les mois échus.
 
-    Même calcul que l'endpoint `/monthly-payments/arrears/` — factorisé ici pour
-    que la relance porte exactement sur ce que le comptable voit à l'écran.
+    Délègue le montant dû à `apps.students.fees` — la même source que l'écran des
+    arriérés. Un parent ne doit jamais recevoir un rappel pour une somme que le
+    comptable ne voit pas à l'écran, et un boursier à 100 % ne doit être relancé
+    pour rien.
     """
     as_of = as_of or date.today()
     elapsed = [p for p in year.tuition_month_ends if p <= as_of]
     if not elapsed:
         return []
 
-    schedules = {s.classroom_id: s.monthly_tuition for s in FeeSchedule.objects.filter(year=year)}
     from django.db.models import Sum
+
+    from apps.students.fees import due_map
+
+    students = list(
+        Student.objects.filter(status=StudentStatus.ACTIVE).select_related(
+            "classroom", "family"
+        )
+    )
+    dues = due_map(year, students)
 
     paid = {
         row["student"]: row["total"] or 0
@@ -81,21 +91,19 @@ def arrears_by_student(year, as_of=None):
     }
 
     results = []
-    for student in Student.objects.filter(status=StudentStatus.ACTIVE).select_related(
-        "classroom", "family"
-    ):
-        tuition = schedules.get(student.classroom_id)
-        if not tuition:
+    for student in students:
+        due = dues.get(student.id)
+        if due is None or due.monthly_tuition == 0:
             continue
-        due = tuition * len(elapsed)
+        expected = due.monthly_tuition * len(elapsed)
         settled = paid.get(student.id, 0)
-        if settled < due:
+        if settled < expected:
             results.append(
                 {
                     "student": student,
-                    "due": due,
+                    "due": expected,
                     "paid": settled,
-                    "arrears": due - settled,
+                    "arrears": expected - settled,
                     "months": len(elapsed),
                 }
             )

@@ -13,7 +13,7 @@ from apps.finance.models import Expense
 from apps.students.models import MonthlyPayment, Student, StudentStatus
 
 from . import exports
-from .services import bilan, comparison, encaissements
+from .services import bilan, comparison, encaissements, scholarships
 
 
 class ReportViewSet(TenantViewSetMixin, ViewSet):
@@ -30,6 +30,7 @@ class ReportViewSet(TenantViewSetMixin, ViewSet):
                     {"key": "comparison", "label": "Comparatif N / N-1"},
                     {"key": "dashboard", "label": "Tableau de bord"},
                     {"key": "cash-forecast", "label": "Trésorerie prévisionnelle"},
+                    {"key": "scholarships", "label": "Bourses accordées"},
                 ]
             }
         )
@@ -51,6 +52,8 @@ class ReportViewSet(TenantViewSetMixin, ViewSet):
             return Response(self._dashboard(year))
         if pk == "cash-forecast":
             return Response(self._cash_forecast(year))
+        if pk == "scholarships":
+            return Response(scholarships(year))
         return Response({"detail": f"Rapport « {pk} » inconnu."}, status=404)
 
     # ------------------------------------------------------------------ #
@@ -91,6 +94,13 @@ class ReportViewSet(TenantViewSetMixin, ViewSet):
         return {
             "year": year.label,
             "headcount": report["headcount_total"],
+            # Visibilité demandée par l'administration : ce que les bourses coûtent.
+            "scholarships": {
+                "beneficiaries": report["scholarships"]["beneficiaries"],
+                "full_scholarships": report["scholarships"]["full_scholarships"],
+                "forgone": report["scholarships"]["total_forgone"],
+                "effort_rate": report["scholarships"]["effort_rate"],
+            },
             "revenue": report["total_resources"]["total"],
             "charges": report["total_charges"]["total"],
             "ebe": report["ebe"]["total"],

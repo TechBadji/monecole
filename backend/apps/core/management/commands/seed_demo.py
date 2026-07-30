@@ -11,6 +11,9 @@ non-régression aient un sens.
 
 import datetime
 import random
+from decimal import Decimal
+
+from django.utils import timezone
 
 from django.contrib.auth import get_user_model
 from django.core.management.base import BaseCommand
@@ -21,7 +24,18 @@ from apps.core.periods import default_year_bounds, end_of_month, month_ends
 from apps.core.tenancy import tenant_context, unscoped
 from apps.finance.models import DEFAULT_EXPENSE_CATEGORIES, Expense, ExpenseCategory, OtherIncome
 from apps.staff.models import PayrollProfile, PayrollScale, Salary, SalaryRubric, Teacher
+from apps.academics.models import (
+    DEFAULT_SUBJECTS,
+    ClassSubject,
+    Composition,
+    Grade,
+    GradeSheet,
+    ReportCardSettings,
+    Subject,
+)
+from apps.attendance.models import AttendanceEvent, AttendanceSettings
 from apps.students.models import (
+    Discount,
     ClassRoom,
     Enrollment,
     Family,
@@ -135,6 +149,9 @@ class Command(BaseCommand):
             self._create_students(school, year, classrooms, options["students"])
             self._create_expenses(school, year, categories)
             self._create_other_income(school, year)
+            self._create_scholarships(school, year, classrooms)
+            self._create_academics(school, year, classrooms, teachers)
+            self._create_attendance(school, year, classrooms)
 
         self._summary(school, year)
 
@@ -159,13 +176,16 @@ class Command(BaseCommand):
 
             # De la plus dépendante à la moins dépendante.
             # Écritures d'abord, puis les référentiels qu'elles protègent.
+            from apps.academics.models import ReportCardSettings as RCS
+            from apps.attendance.models import AttendanceEvent as AE, AttendanceSettings as AS
             from apps.notifications.models import OtpCode, ReminderRun
             from apps.staff.models import PayrollProfile, PayrollScale
 
             for model in (
                 PaymentTransaction, Payslip, MonthlyPayment, Enrollment,
                 Expense, OtherIncome, Salary, PayrollProfile, PayrollScale,
-                OtpCode, ReminderRun,
+                OtpCode, ReminderRun, AE, AS, RCS, Grade, GradeSheet,
+                Composition, ClassSubject, Subject, Discount,
             ):
                 model.all_objects.filter(school=school).delete()
 
@@ -306,8 +326,12 @@ class Command(BaseCommand):
                 )
                 student = Student.objects.create(
                     school=school, first_name=first, last_name=last,
+                    # Âge cohérent avec le niveau : ~3 ans en garderie, ~12 en CM2.
+                    # La formule était inversée et produisait des CM2 de quatre ans.
                     date_of_birth=datetime.date(
-                        2025 - 12 + classroom.order, random.randint(1, 12), random.randint(1, 28)
+                        year.start_date.year - 3 - classroom.order,
+                        random.randint(1, 12),
+                        random.randint(1, 28),
                     ),
                     sex=random.choice(["M", "F"]), classroom=classroom, family=family,
                     parent_name=family.primary_contact, parent_phone=family.phone,
@@ -386,6 +410,145 @@ class Command(BaseCommand):
                 label="Apport en compte courant d'actionnaire",
                 amount=random.choice([500_000, 750_000, 1_000_000]),
             )
+
+    def _create_scholarships(self, school, year, classrooms):
+        """Bourses sociales : quelques élèves à 100 %, d'autres partiellement.
+
+        Reflète une politique réaliste — une poignée de bourses totales, plus
+        d'aides partielles — pour que la ligne « manque à gagner » du bilan porte
+        des chiffres crédibles.
+        """
+        students = list(Student.objects.order_by("matricule"))
+        grants = [
+            (students[0::37], 100, Discount.Kind.FULL, "Orphelin — décision du conseil"),
+            (students[5::29], 50, Discount.Kind.PERCENT, "Situation familiale difficile"),
+            (students[11::41], 25, Discount.Kind.PERCENT, "Fratrie de trois enfants"),
+        ]
+        for cohort, rate, kind, reason in grants:
+            for student in cohort[:6]:
+                Discount.objects.create(
+                    school=school,
+                    student=student,
+                    year=year,
+                    kind=kind,
+                    category=Discount.Category.SIBLING
+                    if "Fratrie" in reason
+                    else Discount.Category.SOCIAL,
+                    scope=Discount.Scope.TUITION,
+                    value=rate,
+                    reason=reason,
+                    approved_by="Conseil de l'établissement",
+                    approved_at=year.start_date,
+                )
+
+    def _create_academics(self, school, year, classrooms, teachers):
+        """Matières, coefficients, une composition trimestrielle et ses notes."""
+        ReportCardSettings.objects.create(
+            school=school,
+            header_line_1="République du Sénégal",
+            header_line_2="Ministère de l'Éducation nationale",
+            header_line_3="Inspection de l'Éducation et de la Formation de Dakar",
+            establishment_code="IEF-DK-0147",
+            principal_name="Awa Diop",
+            principal_title="La Directrice",
+            footer_note="Bulletin à conserver. Toute réclamation doit être formulée "
+            "dans les quinze jours suivant la remise.",
+        )
+        AttendanceSettings.objects.create(school=school)
+
+        subjects = [
+            Subject.objects.create(
+                school=school, code=code, name=name,
+                default_coefficient=coefficient, order=order,
+            )
+            for order, (code, name, coefficient) in enumerate(DEFAULT_SUBJECTS)
+        ]
+
+        # Seul l'élémentaire est noté : le préscolaire ne compose pas.
+        primary = [c for c in classrooms if c.level == Level.PRIMARY]
+        for classroom in primary:
+            for order, subject in enumerate(subjects):
+                ClassSubject.objects.create(
+                    school=school,
+                    classroom=classroom,
+                    subject=subject,
+                    year=year,
+                    coefficient=subject.default_coefficient,
+                    teacher=random.choice(teachers[:7]),
+                    order=order,
+                )
+
+        composition = Composition.objects.create(
+            school=school,
+            year=year,
+            name="1er trimestre",
+            kind=Composition.Kind.TERM,
+            term=1,
+            date=datetime.date(year.start_date.year, 12, 15),
+            status=Composition.Status.OPEN,
+        )
+
+        for class_subject in ClassSubject.objects.filter(year=year).select_related("classroom"):
+            sheet = GradeSheet.objects.create(
+                school=school,
+                composition=composition,
+                class_subject=class_subject,
+                is_validated=True,
+                validated_at=timezone.now(),
+                validated_by="Enseignant",
+            )
+            students = Student.objects.filter(classroom=class_subject.classroom)
+            Grade.objects.bulk_create([
+                Grade(
+                    school=school,
+                    sheet=sheet,
+                    student=student,
+                    # Distribution centrée sur 12, bornée au barème : des notes
+                    # uniformes rendraient le rang et les mentions insignifiants.
+                    value=Decimal(str(min(20, max(0, round(random.gauss(12, 3.2) * 2) / 2)))),
+                )
+                for student in students
+            ])
+
+    def _create_attendance(self, school, year, classrooms):
+        """Passages des dix derniers jours ouvrés."""
+        today = datetime.date.today()
+        days = []
+        cursor = today
+        while len(days) < 10:
+            if cursor.weekday() < 5:  # du lundi au vendredi
+                days.append(cursor)
+            cursor -= datetime.timedelta(days=1)
+
+        students = list(Student.objects.all())
+        events = []
+        for day in days:
+            for student in students:
+                if random.random() < 0.08:   # absences
+                    continue
+                arrival = timezone.make_aware(
+                    datetime.datetime.combine(
+                        day,
+                        datetime.time(7, random.randint(30, 59))
+                        if random.random() > 0.12
+                        else datetime.time(8, random.randint(16, 45)),  # retards
+                    )
+                )
+                departure = timezone.make_aware(
+                    datetime.datetime.combine(day, datetime.time(17, random.randint(0, 30)))
+                )
+                events.append(AttendanceEvent(
+                    school=school, student=student,
+                    direction=AttendanceEvent.Direction.IN,
+                    occurred_at=arrival, day=day,
+                ))
+                if random.random() > 0.05:  # quelques sorties non badgées
+                    events.append(AttendanceEvent(
+                        school=school, student=student,
+                        direction=AttendanceEvent.Direction.OUT,
+                        occurred_at=departure, day=day,
+                    ))
+        AttendanceEvent.objects.bulk_create(events, batch_size=1000)
 
     def _summary(self, school, year):
         from apps.reports.services import bilan

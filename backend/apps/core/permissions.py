@@ -47,6 +47,23 @@ MATRIX = {
     "report": {Role.ADMIN: READ, Role.ACCOUNTANT: READ},
     # --- Migration de données ---------------------------------------------
     "dataimport": {Role.ADMIN: ALL, Role.SECRETARY: WRITE},
+    # --- Assiduité ---------------------------------------------------------
+    # Le badgeage est tenu au portail : la secrétaire et l'enseignant y accèdent,
+    # le parent consulte l'assiduité de son propre enfant.
+    "attendance": {
+        Role.ADMIN: ALL, Role.SECRETARY: WRITE, Role.TEACHER: WRITE,
+        Role.ACCOUNTANT: READ, Role.PARENT: READ,
+    },
+    # --- Vie scolaire ------------------------------------------------------
+    "subject": {Role.ADMIN: ALL, Role.SECRETARY: READ, Role.TEACHER: READ},
+    "composition": {Role.ADMIN: ALL, Role.SECRETARY: READ, Role.TEACHER: READ},
+    # L'enseignant saisit et valide ses notes ; il ne les supprime pas.
+    "grade": {
+        Role.ADMIN: ALL, Role.TEACHER: WRITE, Role.SECRETARY: READ, Role.PARENT: READ,
+    },
+    "reportcard": {
+        Role.ADMIN: ALL, Role.SECRETARY: READ, Role.TEACHER: READ, Role.PARENT: READ,
+    },
 }
 
 # Correspondance méthode HTTP -> action.

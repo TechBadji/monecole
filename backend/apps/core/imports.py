@@ -175,15 +175,109 @@ class Report:
 # --------------------------------------------------------------------------- #
 
 STUDENT_COLUMNS = {
-    "required": ["prenom", "nom", "classe"],
+    "required": ["prenom", "nom"],
     "optional": [
-        "date_de_naissance", "sexe", "parent", "telephone", "email",
-        "adresse", "famille", "statut",
+        "date_de_naissance", "sexe", "parent_telephone", "email", "adresse",
+        "classe", "parent", "famille",
+    ],
+    # Colonnes du modèle téléchargeable, dans l'ordre où l'école les remplit.
+    "template": [
+        "prenom", "nom", "date_de_naissance", "sexe", "classe",
+        "parent_telephone", "email", "adresse",
+    ],
+    "sample": [
+        ["Aminata", "Diop", "12/05/2018", "F", "CP", "77 123 45 67",
+         "fatou.diop@example.sn", "Sacré-Cœur 3, Dakar"],
+        ["Moussa", "Fall", "03/09/2017", "M", "CE1", "70 555 44 33", "",
+         "Ouakam, Dakar"],
+    ],
+    # La colonne « Classe » du fichier prime toujours. Le sélecteur de l'écran
+    # d'import sert de repli pour un fichier ne portant qu'une seule classe : on
+    # ne force pas une école à remplir dix fois la même valeur.
+    "classroom_from_form": True,
+}
+
+TEACHER_COLUMNS = {
+    "required": ["prenom", "nom"],
+    "optional": [
+        "sexe", "telephone", "email", "adresse", "numero_secours",
+        "date_de_naissance", "cni", "fonction", "specialite", "prise_de_service",
+    ],
+    "template": [
+        "prenom", "nom", "sexe", "telephone", "email", "adresse", "numero_secours",
+    ],
+    "sample": [
+        ["Ousmane", "Bodian", "M", "77 222 11 00", "o.bodian@example.sn",
+         "Liberté 6, Dakar", "77 888 99 00"],
+        ["Fatou", "Ndiaye", "F", "70 333 22 11", "", "Yoff, Dakar", "76 111 22 33"],
+    ],
+}
+
+EXPENSE_COLUMNS = {
+    "required": ["date", "intitule", "montant", "rubrique"],
+    "optional": ["date_de_paiement", "frais_de_transfert", "numero_de_facture"],
+    "template": [
+        "date", "intitule", "montant", "rubrique",
+        "date_de_paiement", "frais_de_transfert", "numero_de_facture",
+    ],
+    "sample": [
+        ["15/11/2025", "Loyer de novembre", "450 000", "LOCATIONS DE BÂTIMENTS",
+         "15/11/2025", "1 000", "FAC-2025-114"],
     ],
 }
 
 
-def import_students(school, year, rows, *, dry_run=True):
+def build_template(kind):
+    """Modèle CSV téléchargeable : en-têtes lisibles et deux lignes d'exemple.
+
+    Le point-virgule est le séparateur qu'Excel attend en locale française, et le
+    BOM UTF-8 lui évite d'afficher les accents en mojibake. Sans ces deux
+    précautions, l'école ouvre le fichier, voit « PrÃ©nom », et le corrige à la
+    main — en cassant l'encodage.
+    """
+    columns = IMPORTERS[kind][1]
+    headers = [HEADER_LABELS.get(name, name) for name in columns["template"]]
+
+    buffer = io.StringIO()
+    writer = csv.writer(buffer, delimiter=";", lineterminator="\r\n")
+    writer.writerow(headers)
+    for row in columns.get("sample", []):
+        writer.writerow(row)
+
+    return "\ufeff" + buffer.getvalue()
+
+
+# En-têtes affichés dans le modèle. `normalize_header` les ramène aux clés
+# internes, accents et espaces compris.
+HEADER_LABELS = {
+    "prenom": "Prénom",
+    "nom": "Nom",
+    "date_de_naissance": "Date de naissance",
+    "sexe": "Sexe",
+    "parent_telephone": "Parent téléphone",
+    "email": "Email",
+    "adresse": "Adresse",
+    "classe": "Classe",
+    "telephone": "Téléphone",
+    "numero_secours": "Numéro secours",
+    "date": "Date",
+    "intitule": "Intitulé",
+    "montant": "Montant",
+    "rubrique": "Rubrique",
+    "date_de_paiement": "Date de paiement",
+    "frais_de_transfert": "Frais de transfert",
+    "numero_de_facture": "Numéro de facture",
+}
+
+
+def import_students(school, year, rows, *, dry_run=True, classroom=None):
+    """Importe des élèves.
+
+    `classroom` est la classe choisie sur l'écran d'import, appliquée à tout le
+    fichier. Une colonne `classe` présente dans le fichier prime sur ce choix :
+    une école qui prépare un fichier multi-classes ne doit pas être contrainte
+    d'en faire dix.
+    """
     report = Report("students", dry_run)
     if not rows:
         report.errors.append({"line": 0, "message": "Aucune ligne à importer."})
@@ -195,15 +289,25 @@ def import_students(school, year, rows, *, dry_run=True):
             {
                 "line": 1,
                 "message": f"Colonnes obligatoires absentes : {', '.join(missing)}. "
-                f"Attendu : {', '.join(STUDENT_COLUMNS['required'])}.",
+                f"Téléchargez le modèle pour obtenir les en-têtes attendus.",
             }
         )
         return report, []
 
     classrooms = {c.name.upper(): c for c in ClassRoom.objects.all()}
+    has_class_column = "classe" in rows[0]
+    if classroom is None and not has_class_column:
+        report.errors.append(
+            {
+                "line": 0,
+                "message": "Aucune classe indiquée. Choisissez une classe de "
+                "destination, ou ajoutez une colonne « Classe » au fichier.",
+            }
+        )
+        return report, []
+
     existing = {
-        (s.first_name.lower(), s.last_name.lower()): s
-        for s in Student.objects.all()
+        (s.first_name.lower(), s.last_name.lower()): s for s in Student.objects.all()
     }
     families = {f.name.lower(): f for f in Family.objects.all()}
 
@@ -211,19 +315,25 @@ def import_students(school, year, rows, *, dry_run=True):
     for index, row in enumerate(rows):
         first_name = row.get("prenom", "").strip()
         last_name = row.get("nom", "").strip()
-        class_name = row.get("classe", "").strip().upper()
 
         if not first_name or not last_name:
             report.error(index, "Prénom et nom sont obligatoires.")
             continue
 
-        classroom = classrooms.get(class_name)
-        if classroom is None:
-            report.error(
-                index,
-                f"Classe « {row.get('classe')} » inconnue. "
-                f"Classes disponibles : {', '.join(sorted(classrooms))}.",
-            )
+        # La colonne du fichier prime, sinon la classe choisie à l'import.
+        target = classroom
+        raw_class = row.get("classe", "").strip()
+        if raw_class:
+            target = classrooms.get(raw_class.upper())
+            if target is None:
+                report.error(
+                    index,
+                    f"Classe « {raw_class} » inconnue. "
+                    f"Classes disponibles : {', '.join(sorted(classrooms))}.",
+                )
+                continue
+        if target is None:
+            report.error(index, "Aucune classe pour cette ligne.")
             continue
 
         try:
@@ -232,11 +342,16 @@ def import_students(school, year, rows, *, dry_run=True):
             report.error(index, str(error))
             continue
 
+        # Le modèle expose `parent_telephone` ; `telephone` reste accepté pour les
+        # fichiers préparés avant ce changement.
+        phone = row.get("parent_telephone") or row.get("telephone") or ""
+
         key = (first_name.lower(), last_name.lower())
         if key in existing:
             report.warn(
                 index,
-                f"« {first_name} {last_name} » existe déjà — la fiche sera mise à jour.",
+                f"« {first_name} {last_name} » existe déjà — la fiche sera mise à jour, "
+                f"son matricule est conservé.",
             )
 
         prepared.append(
@@ -245,11 +360,11 @@ def import_students(school, year, rows, *, dry_run=True):
                 "key": key,
                 "first_name": first_name,
                 "last_name": last_name,
-                "classroom": classroom,
+                "classroom": target,
                 "date_of_birth": birth_date,
                 "sex": parse_sex(row.get("sexe")),
                 "parent_name": row.get("parent", ""),
-                "parent_phone": row.get("telephone", ""),
+                "parent_phone": phone,
                 "parent_email": row.get("email", ""),
                 "address": row.get("adresse", ""),
                 "family_name": row.get("famille", "").strip() or last_name,
@@ -286,6 +401,8 @@ def import_students(school, year, rows, *, dry_run=True):
                 "family": family,
             }
             if student:
+                # Le matricule n'est jamais réattribué : il accompagne l'élève tout
+                # son cursus, y compris à travers un réimport.
                 for key, value in fields.items():
                     setattr(student, key, value)
                 student.save()
@@ -308,15 +425,20 @@ def import_students(school, year, rows, *, dry_run=True):
 # --------------------------------------------------------------------------- #
 
 
-def import_teachers(school, year, rows, *, dry_run=True):
+def import_teachers(school, year, rows, *, dry_run=True, classroom=None):
     report = Report("teachers", dry_run)
     if not rows:
         report.errors.append({"line": 0, "message": "Aucune ligne à importer."})
         return report, []
 
-    if "nom" not in rows[0] or "prenom" not in rows[0]:
+    missing = [c for c in TEACHER_COLUMNS["required"] if c not in rows[0]]
+    if missing:
         report.errors.append(
-            {"line": 1, "message": "Colonnes obligatoires : prenom, nom."}
+            {
+                "line": 1,
+                "message": f"Colonnes obligatoires absentes : {', '.join(missing)}. "
+                f"Téléchargez le modèle pour obtenir les en-têtes attendus.",
+            }
         )
         return report, []
 
@@ -331,18 +453,15 @@ def import_teachers(school, year, rows, *, dry_run=True):
                     "first_name": row["prenom"],
                     "last_name": row["nom"],
                     "sex": parse_sex(row.get("sexe")),
+                    "phone": row.get("telephone", ""),
+                    "email": row.get("email", ""),
+                    "address": row.get("adresse", ""),
+                    "emergency_contact": row.get("numero_secours", ""),
                     "date_of_birth": parse_date(row.get("date_de_naissance")),
                     "cni": row.get("cni", ""),
-                    "corps": row.get("corps", ""),
-                    "grade": row.get("grade", ""),
-                    "academic_diploma": row.get("diplome_academique", ""),
-                    "professional_diploma": row.get("diplome_professionnel", ""),
-                    "entry_date": parse_date(row.get("date_d_entree")),
-                    "specialty": row.get("specialite", ""),
                     "function": row.get("fonction", ""),
+                    "specialty": row.get("specialite", ""),
                     "service_start_date": parse_date(row.get("prise_de_service")),
-                    "courses_taught": row.get("cours_tenus", ""),
-                    "class_type": row.get("type_classe", ""),
                 }
             )
         except ValueError as error:
@@ -367,7 +486,7 @@ def import_teachers(school, year, rows, *, dry_run=True):
 # --------------------------------------------------------------------------- #
 
 
-def import_expenses(school, year, rows, *, dry_run=True):
+def import_expenses(school, year, rows, *, dry_run=True, classroom=None):
     report = Report("expenses", dry_run)
     if not rows:
         report.errors.append({"line": 0, "message": "Aucune ligne à importer."})
@@ -439,10 +558,6 @@ def import_expenses(school, year, rows, *, dry_run=True):
 
 IMPORTERS = {
     "students": (import_students, STUDENT_COLUMNS),
-    "teachers": (import_teachers, {"required": ["prenom", "nom"], "optional": []}),
-    "expenses": (
-        import_expenses,
-        {"required": ["date", "intitule", "montant", "rubrique"],
-         "optional": ["date_de_paiement", "frais_de_transfert", "numero_de_facture"]},
-    ),
+    "teachers": (import_teachers, TEACHER_COLUMNS),
+    "expenses": (import_expenses, EXPENSE_COLUMNS),
 }

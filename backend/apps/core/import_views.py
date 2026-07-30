@@ -6,13 +6,32 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .audit import record
-from .imports import IMPORTERS, ImportError_, read_rows
+from .imports import IMPORTERS, ImportError_, build_template, read_rows
 from .models import AuditLog
 from .views_base import TenantViewSetMixin
 
 # Un CSV d'élèves d'une école de 1 000 enfants pèse moins de 200 Ko. Au-delà, il
 # s'agit presque sûrement d'une erreur de fichier.
 MAX_UPLOAD_BYTES = 5 * 1024 * 1024
+
+
+class ImportTemplateView(TenantViewSetMixin, APIView):
+    """Modèle CSV à remplir, un par type de données."""
+
+    resource = "dataimport"
+
+    def get(self, request, kind):
+        if kind not in IMPORTERS:
+            raise ValidationError(
+                {"kind": f"Type inconnu. Attendu : {', '.join(IMPORTERS)}."}
+            )
+        from django.http import HttpResponse
+
+        # `text/csv` avec le BOM déjà présent dans le contenu : Excel ouvre alors
+        # le fichier avec les accents intacts et les colonnes séparées.
+        response = HttpResponse(build_template(kind), content_type="text/csv; charset=utf-8")
+        response["Content-Disposition"] = f'attachment; filename="modele-{kind}.csv"'
+        return response
 
 
 class DataImportView(TenantViewSetMixin, APIView):
@@ -34,6 +53,8 @@ class DataImportView(TenantViewSetMixin, APIView):
                         "kind": kind,
                         "required_columns": columns["required"],
                         "optional_columns": columns.get("optional", []),
+                        "template_columns": columns.get("template", []),
+                        "needs_classroom": columns.get("classroom_from_form", False),
                     }
                     for kind, (_, columns) in IMPORTERS.items()
                 ],
@@ -71,9 +92,21 @@ class DataImportView(TenantViewSetMixin, APIView):
         except ImportError_ as error:
             raise ValidationError({"file": str(error)})
 
+        # Classe de destination, appliquée aux lignes sans colonne « Classe ».
+        classroom = None
+        raw_classroom = request.data.get("classroom")
+        if raw_classroom:
+            from apps.students.models import ClassRoom
+
+            classroom = ClassRoom.objects.filter(pk=raw_classroom).first()
+            if classroom is None:
+                raise ValidationError({"classroom": "Classe introuvable."})
+
         importer, _ = IMPORTERS[kind]
         year = self.current_year()
-        report, _ = importer(request.user.school, year, rows, dry_run=dry_run)
+        report, _ = importer(
+            request.user.school, year, rows, dry_run=dry_run, classroom=classroom
+        )
 
         if not dry_run and report.errors:
             # Rien n'a été écrit : on le dit clairement plutôt que de laisser croire

@@ -56,14 +56,21 @@ class BilanPerformanceTests(TestCase):
                 for classroom in classrooms
             ])
 
-            students = Student.objects.bulk_create([
-                Student(
-                    school=cls.school, classroom=classroom,
-                    first_name=f"Élève{index}", last_name=classroom.name,
+            # `bulk_create` ne passe pas par `save()` : les matricules doivent
+            # être attribués explicitement avant l'insertion.
+            students = Student.objects.bulk_create(
+                Student.assign_matricules(
+                    [
+                        Student(
+                            school=cls.school, classroom=classroom,
+                            first_name=f"Élève{index}", last_name=classroom.name,
+                        )
+                        for classroom in classrooms
+                        for index in range(STUDENTS_PER_CLASS)
+                    ],
+                    cls.school,
                 )
-                for classroom in classrooms
-                for index in range(STUDENTS_PER_CLASS)
-            ])
+            )
 
             Enrollment.objects.bulk_create([
                 Enrollment(

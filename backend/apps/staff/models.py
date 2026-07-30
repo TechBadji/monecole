@@ -49,6 +49,13 @@ class Teacher(TenantScopedModel):
     courses_taught = models.CharField("cours tenu(s)", max_length=255, blank=True)
     class_type = models.CharField("type de classe", max_length=100, blank=True)
     students_count = models.PositiveSmallIntegerField("effectifs", null=True, blank=True)
+    phone = models.CharField("téléphone", max_length=30, blank=True)
+    email = models.EmailField("email", blank=True)
+    address = models.CharField("adresse", max_length=255, blank=True)
+    emergency_contact = models.CharField(
+        "numéro de secours", max_length=60, blank=True,
+        help_text="Personne à joindre en cas d'urgence.",
+    )
     contract_type = models.CharField(
         "type de contrat", max_length=15, choices=ContractType.choices, default=ContractType.PERMANENT
     )

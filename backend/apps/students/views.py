@@ -70,16 +70,17 @@ class StudentViewSet(AuditedModelViewSetMixin, TenantModelViewSet):
 
     @action(detail=True, methods=["get"])
     def ledger(self, request, pk=None):
-        """Situation financière de l'élève : dû, réglé, reste à payer.
+        """Situation financière de l'élève pour une année : dû, réglé, reste à payer.
 
-        Le classeur source n'enregistre que les sommes reçues, ce qui ne permet pas
-        de distinguer un paiement partiel d'un paiement complet. La grille tarifaire
-        fournit ici le montant dû, d'où découlent le solde et le retard.
+        `?year=<id>` permet de consulter un exercice antérieur — la situation
+        passée d'un élève reste consultable tout au long de son cursus.
         """
+        from .fees import due_for
+
         student = self.get_object()
         year = self.current_year()
-        schedule = FeeSchedule.objects.filter(classroom=student.classroom, year=year).first()
-        if schedule is None:
+        due = due_for(student, year)
+        if due is None:
             raise ValidationError(
                 {
                     "fee_schedule": f"Aucune grille tarifaire pour {student.classroom} "
@@ -88,31 +89,22 @@ class StudentViewSet(AuditedModelViewSetMixin, TenantModelViewSet):
             )
 
         enrollment = Enrollment.objects.filter(student=student, year=year).first()
-        payments = MonthlyPayment.objects.filter(student=student, year=year).order_by("period")
+        payments = {
+            p.period: p
+            for p in MonthlyPayment.objects.filter(student=student, year=year)
+        }
 
-        discounts = Discount.objects.filter(year=year).filter(
-            Q(student=student) | Q(family=student.family_id)
-        )
-        tuition_due = schedule.monthly_tuition
-        registration_due = schedule.registration_fee
-        for discount in discounts:
-            if discount.scope in (Discount.Scope.TUITION, Discount.Scope.BOTH):
-                tuition_due = discount.apply_to(tuition_due)
-            if discount.scope in (Discount.Scope.REGISTRATION, Discount.Scope.BOTH):
-                registration_due = discount.apply_to(registration_due)
-
-        paid_by_period = {p.period: p for p in payments}
         lines = []
         for period in year.tuition_month_ends:
-            payment = paid_by_period.get(period)
+            payment = payments.get(period)
             paid = payment.tuition if payment else 0
             lines.append(
                 {
                     "period": period,
-                    "due": tuition_due,
+                    "due": due.monthly_tuition,
                     "paid": paid,
-                    "balance": tuition_due - paid,
-                    "status": _payment_status(paid, tuition_due),
+                    "balance": max(0, due.monthly_tuition - paid),
+                    "status": _payment_status(paid, due.monthly_tuition),
                     "canteen": payment.canteen if payment else 0,
                     "reinforcement": payment.reinforcement if payment else 0,
                     "uniform": payment.uniform if payment else 0,
@@ -120,27 +112,116 @@ class StudentViewSet(AuditedModelViewSetMixin, TenantModelViewSet):
             )
 
         registration_paid = enrollment.registration_amount if enrollment else 0
-        total_due = registration_due + tuition_due * year.tuition_months
+        total_due = due.registration + due.monthly_tuition * year.tuition_months
         total_paid = registration_paid + sum(line["paid"] for line in lines)
 
         return Response(
             {
-                "student": {"id": student.id, "name": student.full_name,
-                            "classroom": student.classroom.name},
+                "student": {
+                    "id": student.id,
+                    "matricule": student.matricule,
+                    "name": student.full_name,
+                    "classroom": student.classroom.name,
+                },
                 "year": year.label,
+                "year_id": year.id,
                 "registration": {
-                    "due": registration_due,
+                    "due": due.registration,
                     "paid": registration_paid,
-                    "balance": registration_due - registration_paid,
-                    "status": _payment_status(registration_paid, registration_due),
+                    "balance": max(0, due.registration - registration_paid),
+                    "status": _payment_status(registration_paid, due.registration),
                 },
                 "months": lines,
-                "discounts": DiscountSerializer(discounts, many=True).data,
+                "discounts": DiscountSerializer(due.discounts, many=True).data,
+                "scholarship": {
+                    "rate": due.scholarship_rate,
+                    "is_full": due.is_full_scholarship,
+                    "forgone": due.forgone(year.tuition_months),
+                    "full_monthly_tuition": due.full_monthly_tuition,
+                },
                 "total_due": total_due,
                 "total_paid": total_paid,
-                "balance": total_due - total_paid,
+                "balance": max(0, total_due - total_paid),
             }
         )
+
+    @action(detail=True, methods=["get"])
+    def history(self, request, pk=None):
+        """Situation financière année par année, sur tout le cursus de l'élève.
+
+        Une année sans grille tarifaire est retournée avec `available` à faux
+        plutôt qu'omise : l'absence de tarif est une information, pas un trou.
+        """
+        from apps.core.models import SchoolYear
+
+        from .fees import due_for
+
+        student = self.get_object()
+        years = SchoolYear.objects.order_by("-start_date")
+
+        entries = []
+        for year in years:
+            due = due_for(student, year)
+            enrollment = Enrollment.objects.filter(student=student, year=year).first()
+            paid_tuition = (
+                MonthlyPayment.objects.filter(student=student, year=year).aggregate(
+                    total=Sum("tuition")
+                )["total"]
+                or 0
+            )
+            registration_paid = enrollment.registration_amount if enrollment else 0
+
+            if due is None:
+                entries.append(
+                    {
+                        "year": year.label,
+                        "year_id": year.id,
+                        "available": False,
+                        "enrolled": enrollment is not None,
+                        "total_paid": registration_paid + paid_tuition,
+                    }
+                )
+                continue
+
+            total_due = due.registration + due.monthly_tuition * year.tuition_months
+            total_paid = registration_paid + paid_tuition
+            entries.append(
+                {
+                    "year": year.label,
+                    "year_id": year.id,
+                    "available": True,
+                    "enrolled": enrollment is not None,
+                    "classroom": enrollment.classroom.name if enrollment else None,
+                    "total_due": total_due,
+                    "total_paid": total_paid,
+                    "balance": max(0, total_due - total_paid),
+                    "scholarship_rate": due.scholarship_rate,
+                    "is_full_scholarship": due.is_full_scholarship,
+                }
+            )
+
+        return Response(
+            {
+                "student": {
+                    "id": student.id,
+                    "matricule": student.matricule,
+                    "name": student.full_name,
+                },
+                "years": entries,
+            }
+        )
+
+    @action(detail=True, methods=["get"], url_path="qr")
+    def qr(self, request, pk=None):
+        """QR code de l'élève, en PNG."""
+        from apps.attendance.qr import student_qr_png
+
+        student = self.get_object()
+        response = student_qr_png(student)
+        response["Content-Disposition"] = (
+            f'inline; filename="qr-{student.matricule}.png"'
+        )
+        return response
 
 
 def _payment_status(paid, due):
@@ -287,13 +368,22 @@ class MonthlyPaymentViewSet(AuditedModelViewSetMixin, TenantModelViewSet):
 
     @action(detail=False, methods=["get"])
     def arrears(self, request):
-        """Élèves en retard de paiement, tous mois échus confondus."""
+        """Élèves en retard de paiement, tous mois échus confondus.
+
+        Les réductions et bourses sont appliquées : sans elles, un élève boursier
+        à 100 % apparaissait en tête des impayés pour une somme qu'il ne devait
+        pas — et se faisait relancer par SMS.
+        """
+        from .fees import due_map
+
         year = self.current_year()
-        schedules = {
-            s.classroom_id: s for s in FeeSchedule.objects.filter(year=year)
-        }
+        students = list(
+            Student.objects.filter(status=StudentStatus.ACTIVE).select_related("classroom")
+        )
+        dues = due_map(year, students)
+
         paid = {
-            row["student"]: row["total"]
+            row["student"]: row["total"] or 0
             for row in MonthlyPayment.objects.filter(year=year)
             .values("student")
             .annotate(total=Sum("tuition"))
@@ -305,25 +395,26 @@ class MonthlyPaymentViewSet(AuditedModelViewSetMixin, TenantModelViewSet):
         elapsed = [p for p in year.tuition_month_ends if p <= today]
 
         results = []
-        for student in Student.objects.filter(status=StudentStatus.ACTIVE).select_related(
-            "classroom"
-        ):
-            schedule = schedules.get(student.classroom_id)
-            if schedule is None:
+        for student in students:
+            due = dues.get(student.id)
+            if due is None or due.monthly_tuition == 0:
+                # Pas de tarif, ou bourse totale : rien n'est exigible.
                 continue
-            due = schedule.monthly_tuition * len(elapsed)
+            expected = due.monthly_tuition * len(elapsed)
             settled = paid.get(student.id, 0)
-            if settled < due:
+            if settled < expected:
                 results.append(
                     {
                         "student": student.id,
+                        "matricule": student.matricule,
                         "name": student.full_name,
                         "classroom": student.classroom.name,
                         "parent_phone": student.parent_phone,
-                        "due": due,
+                        "due": expected,
                         "paid": settled,
-                        "arrears": due - settled,
+                        "arrears": expected - settled,
                         "months_elapsed": len(elapsed),
+                        "scholarship_rate": due.scholarship_rate,
                     }
                 )
 

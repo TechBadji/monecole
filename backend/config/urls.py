@@ -11,6 +11,8 @@ urlpatterns = [
     path("api/", include("apps.reports.urls")),
     path("api/", include("apps.notifications.urls")),
     path("api/", include("apps.payments.urls")),
+    path("api/", include("apps.academics.urls")),
+    path("api/", include("apps.attendance.urls")),
     path("api/schema/", SpectacularAPIView.as_view(), name="schema"),
     path(
         "api/docs/",

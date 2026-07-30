@@ -83,6 +83,14 @@ class Student(TenantScopedModel):
     ses encaissements antérieurs demeurent acquis.
     """
 
+    matricule = models.CharField(
+        "matricule",
+        max_length=10,
+        default="",
+        editable=False,
+        help_text="Format MXXXX, attribué à l'inscription et conservé pour tout "
+        "le cursus, même en cas de changement de classe ou de redoublement.",
+    )
     first_name = models.CharField("prénom", max_length=100)
     last_name = models.CharField("nom", max_length=100)
     date_of_birth = models.DateField("date de naissance", null=True, blank=True)
@@ -121,9 +129,14 @@ class Student(TenantScopedModel):
         verbose_name_plural = "élèves"
         ordering = ["last_name", "first_name"]
         indexes = [models.Index(fields=["school", "classroom", "status"])]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["school", "matricule"], name="unique_student_matricule_per_school"
+            )
+        ]
 
     def __str__(self):
-        return self.full_name
+        return f"{self.matricule} — {self.full_name}" if self.matricule else self.full_name
 
     @property
     def full_name(self):
@@ -137,7 +150,90 @@ class Student(TenantScopedModel):
         from apps.notifications.sms import normalize_phone
 
         self.parent_phone_e164 = normalize_phone(self.parent_phone) if self.parent_phone else ""
+
+        # L'établissement doit être connu avant le calcul du matricule, qui
+        # numérote par école. `TenantScopedModel.save()` le renseigne depuis le
+        # contexte, mais trop tard pour nous.
+        if self.school_id is None:
+            from apps.core.tenancy import get_current_tenant
+
+            tenant = get_current_tenant()
+            if tenant is not None:
+                self.school = tenant
+        if not self.matricule:
+            self.matricule = self._next_matricule()
+
         return super().save(*args, **kwargs)
+
+    def _next_matricule(self):
+        """Matricule suivant au format MXXXX, propre à l'établissement.
+
+        `select_for_update` sérialise deux inscriptions concurrentes : sans cela,
+        deux secrétaires enregistrant un élève au même instant obtiendraient le
+        même numéro. La contrainte d'unicité reste le garde-fou final.
+        """
+        from django.db import transaction
+
+        if self.school_id is None:
+            raise ValueError(
+                "L'établissement doit être connu pour attribuer un matricule : "
+                "la numérotation est propre à chaque école."
+            )
+        with transaction.atomic():
+            last = (
+                Student.all_objects.select_for_update()
+                .filter(school=self.school_id, matricule__startswith="M")
+                .order_by("-matricule")
+                .first()
+            )
+            nxt = 1
+            if last and last.matricule[1:].isdigit():
+                nxt = int(last.matricule[1:]) + 1
+            return f"M{nxt:04d}"
+
+    @classmethod
+    def assign_matricules(cls, students, school):
+        """Attribue les matricules d'un lot avant `bulk_create`.
+
+        `bulk_create` court-circuite `save()` : sans cet appel, tous les élèves du
+        lot partiraient avec un matricule vide et se heurteraient à la contrainte
+        d'unicité. Les chemins d'insertion en masse — import, seed, tests — doivent
+        passer par ici.
+        """
+        from django.db import transaction
+
+        with transaction.atomic():
+            last = (
+                cls.all_objects.select_for_update()
+                .filter(school=school, matricule__startswith="M")
+                .order_by("-matricule")
+                .first()
+            )
+            nxt = int(last.matricule[1:]) + 1 if last and last.matricule[1:].isdigit() else 1
+            for offset, student in enumerate(students):
+                if not student.matricule:
+                    student.matricule = f"M{nxt + offset:04d}"
+        return students
+
+    @property
+    def qr_payload(self):
+        """Contenu du QR code de l'élève.
+
+        ⚠️ Décision explicite du client (30/07/2026) : les données sont en clair,
+        pour que le badge reste scannable hors ligne et sans compte. Le risque a
+        été exposé et assumé — une carte perdue révèle l'identité d'un mineur, sa
+        date de naissance et le numéro de son parent. Ce n'est pas un oubli.
+        L'alternative (jeton signé résolu par l'API) reste implémentable sans
+        changer le reste du module : seul ce champ et le scanner évolueraient.
+        """
+        birth = self.date_of_birth.isoformat() if self.date_of_birth else ""
+        return "|".join([
+            self.matricule,
+            self.last_name,
+            self.first_name,
+            birth,
+            self.parent_phone_e164 or "",
+        ])
 
 
 class ClassEnrollmentHistory(TenantScopedModel):
@@ -316,6 +412,21 @@ class Discount(TenantScopedModel):
         TUITION = "TUITION", "Mensualité"
         BOTH = "BOTH", "Inscription et mensualité"
 
+    class Category(models.TextChoices):
+        """Nature de la réduction.
+
+        La distinction n'est pas cosmétique : le bilan chiffre séparément l'effort
+        social de l'établissement (`SOCIAL`) et les gestes commerciaux ou
+        familiaux. Les confondre empêcherait l'administration de savoir ce que ses
+        bourses lui coûtent réellement.
+        """
+
+        SOCIAL = "SOCIAL", "Bourse sociale"
+        SIBLING = "SIBLING", "Réduction fratrie"
+        STAFF = "STAFF", "Enfant du personnel"
+        MERIT = "MERIT", "Bourse au mérite"
+        OTHER = "OTHER", "Autre"
+
     student = models.ForeignKey(
         Student, on_delete=models.CASCADE, null=True, blank=True, related_name="discounts"
     )
@@ -324,6 +435,9 @@ class Discount(TenantScopedModel):
     )
     year = models.ForeignKey(SchoolYear, on_delete=models.CASCADE, related_name="discounts")
     kind = models.CharField("type", max_length=10, choices=Kind.choices)
+    category = models.CharField(
+        "nature", max_length=15, choices=Category.choices, default=Category.SOCIAL
+    )
     scope = models.CharField("portée", max_length=15, choices=Scope.choices, default=Scope.BOTH)
     value = models.PositiveIntegerField(
         "valeur", **MONEY, help_text="Pourcentage de 0 à 100, ou montant en devise."
@@ -351,6 +465,11 @@ class Discount(TenantScopedModel):
 
     def __str__(self):
         return f"{self.get_kind_display()} {self.value} — {self.student or self.family}"
+
+    @property
+    def is_scholarship(self):
+        """Bourse à proprement parler, par opposition à un geste commercial."""
+        return self.category in (self.Category.SOCIAL, self.Category.MERIT)
 
     def apply_to(self, amount):
         """Montant après application de la réduction."""

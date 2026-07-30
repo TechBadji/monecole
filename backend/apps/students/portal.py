@@ -13,7 +13,7 @@ from rest_framework.views import APIView
 from apps.core.models import Role
 from apps.core.views_base import TenantViewSetMixin
 
-from .models import Discount, Enrollment, FeeSchedule, MonthlyPayment, Student, StudentStatus
+from .models import Enrollment, MonthlyPayment, Student, StudentStatus
 
 
 class ParentScopedMixin(TenantViewSetMixin):
@@ -44,25 +44,15 @@ class ParentScopedMixin(TenantViewSetMixin):
 
 def student_ledger(student, year):
     """Situation financière d'un élève : dû, réglé, reste à payer, par échéance."""
-    schedule = FeeSchedule.objects.filter(classroom=student.classroom, year=year).first()
-    if schedule is None:
-        return None
+    from .fees import due_for
 
-    discounts = Discount.objects.filter(year=year).filter(
-        Q(student=student) | Q(family=student.family_id)
-    )
-    tuition_due = schedule.monthly_tuition
-    registration_due = schedule.registration_fee
-    for discount in discounts:
-        if discount.scope in (Discount.Scope.TUITION, Discount.Scope.BOTH):
-            tuition_due = discount.apply_to(tuition_due)
-        if discount.scope in (Discount.Scope.REGISTRATION, Discount.Scope.BOTH):
-            registration_due = discount.apply_to(registration_due)
+    due = due_for(student, year)
+    if due is None:
+        return None
 
     enrollment = Enrollment.objects.filter(student=student, year=year).first()
     payments = {
-        p.period: p
-        for p in MonthlyPayment.objects.filter(student=student, year=year)
+        p.period: p for p in MonthlyPayment.objects.filter(student=student, year=year)
     }
 
     months = []
@@ -72,10 +62,12 @@ def student_ledger(student, year):
         months.append(
             {
                 "period": period,
-                "due": tuition_due,
+                "due": due.monthly_tuition,
                 "paid": paid,
-                "balance": max(0, tuition_due - paid),
-                "status": "PAID" if paid >= tuition_due else ("PARTIAL" if paid else "UNPAID"),
+                "balance": max(0, due.monthly_tuition - paid),
+                "status": "PAID" if paid >= due.monthly_tuition else (
+                    "PARTIAL" if paid else "UNPAID"
+                ),
                 "canteen": payment.canteen if payment else 0,
                 "reinforcement": payment.reinforcement if payment else 0,
                 "paid_at": payment.payment_date if payment else None,
@@ -84,21 +76,22 @@ def student_ledger(student, year):
         )
 
     registration_paid = enrollment.registration_amount if enrollment else 0
-    total_due = registration_due + tuition_due * year.tuition_months
+    total_due = due.registration + due.monthly_tuition * year.tuition_months
     total_paid = registration_paid + sum(m["paid"] for m in months)
 
     return {
         "student": {
             "id": student.id,
+            "matricule": student.matricule,
             "name": student.full_name,
             "classroom": student.classroom.name,
         },
         "year": year.label,
         "registration": {
-            "due": registration_due,
+            "due": due.registration,
             "paid": registration_paid,
-            "balance": max(0, registration_due - registration_paid),
-            "status": "PAID" if registration_paid >= registration_due else (
+            "balance": max(0, due.registration - registration_paid),
+            "status": "PAID" if registration_paid >= due.registration else (
                 "PARTIAL" if registration_paid else "UNPAID"
             ),
         },
@@ -106,18 +99,21 @@ def student_ledger(student, year):
         "discounts": [
             {
                 "kind": d.get_kind_display(),
+                "category": d.get_category_display(),
                 "scope": d.get_scope_display(),
                 "value": d.value,
                 "reason": d.reason,
             }
-            for d in discounts
+            for d in due.discounts
         ],
+        "scholarship_rate": due.scholarship_rate,
+        "is_full_scholarship": due.is_full_scholarship,
         "total_due": total_due,
         "total_paid": total_paid,
         "balance": max(0, total_due - total_paid),
-        # Ce qui reste dû sur les mois déjà échus — c'est le montant réellement
-        # exigible aujourd'hui, à ne pas confondre avec le total de l'année.
-        "due_now": _due_now(months, registration_due, registration_paid),
+        # Ce qui reste dû sur les mois déjà échus — le montant réellement exigible
+        # aujourd'hui, à ne pas confondre avec le total de l'année.
+        "due_now": _due_now(months, due.registration, registration_paid),
     }
 
 

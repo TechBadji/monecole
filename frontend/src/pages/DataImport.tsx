@@ -1,11 +1,18 @@
 import { useState, type FormEvent } from "react";
 
-import { tokens } from "../api";
+import { api, tokens } from "../api";
 import { useResource } from "../hooks";
+import type { ClassRoom, Paginated } from "../types";
 
 const API = import.meta.env.VITE_API_URL ?? "http://localhost:8000/api";
 
-type Format = { kind: string; required_columns: string[]; optional_columns: string[] };
+type Format = {
+  kind: string;
+  required_columns: string[];
+  optional_columns: string[];
+  template_columns: string[];
+  needs_classroom: boolean;
+};
 type Formats = { kinds: Format[]; notes: string[] };
 
 type Report = {
@@ -31,7 +38,9 @@ const LABELS: Record<string, string> = {
 
 export default function DataImport() {
   const { data: formats } = useResource<Formats>("/imports/");
+  const { data: classes } = useResource<Paginated<ClassRoom>>("/classes/");
   const [kind, setKind] = useState("students");
+  const [classroom, setClassroom] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [report, setReport] = useState<Report | null>(null);
   const [busy, setBusy] = useState(false);
@@ -50,6 +59,8 @@ export default function DataImport() {
     body.append("kind", kind);
     body.append("file", file);
     body.append("dry_run", dryRun ? "true" : "false");
+    // Classe de repli pour les lignes sans colonne « Classe ».
+    if (classroom) body.append("classroom", classroom);
 
     try {
       const response = await fetch(`${API}/imports/`, {
@@ -82,9 +93,21 @@ export default function DataImport() {
         <div>
           <h1>Import de données</h1>
           <p>
-            Reprise de fichiers existants. Chaque import est d'abord vérifié ligne à
-            ligne — rien n'est écrit tant que vous n'avez pas confirmé.
+            Reprise de fichiers existants. Téléchargez le modèle, remplissez-le, puis
+            déposez-le ici. Chaque import est d'abord vérifié ligne à ligne — rien
+            n'est écrit tant que vous n'avez pas confirmé.
           </p>
+        </div>
+        <div className="page-actions">
+          <button
+            type="button"
+            className="secondary"
+            onClick={() =>
+              api.download(`/imports/template/${kind}.csv`, `modele-${kind}.csv`)
+            }
+          >
+            Télécharger le modèle {LABELS[kind]?.toLowerCase() ?? kind}
+          </button>
         </div>
       </div>
 
@@ -125,6 +148,24 @@ export default function DataImport() {
             />
           </div>
 
+          {format?.needs_classroom && (
+            <div className="field">
+              <label htmlFor="classroom">Classe par défaut</label>
+              <select
+                id="classroom"
+                value={classroom}
+                onChange={(event) => setClassroom(event.target.value)}
+              >
+                <option value="">— d'après le fichier —</option>
+                {classes?.results.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
           <button type="submit" disabled={busy || !file}>
             {busy ? "Analyse…" : "Vérifier le fichier"}
           </button>
@@ -134,21 +175,27 @@ export default function DataImport() {
       {format && (
         <div className="card">
           <div className="card-title">Colonnes attendues</div>
-          <p style={{ margin: "0 0 8px" }}>
+          <p className="column-list">
+            <strong>Colonnes du modèle :</strong>{" "}
+            {format.template_columns.map((c) => (
+              <code key={c}>{c}</code>
+            ))}
+          </p>
+          <p className="column-list">
             <strong>Obligatoires :</strong>{" "}
             {format.required_columns.map((c) => (
-              <code key={c} style={{ marginRight: 6 }}>{c}</code>
+              <code key={c}>{c}</code>
             ))}
           </p>
           {format.optional_columns.length > 0 && (
-            <p style={{ margin: "0 0 8px" }}>
+            <p className="column-list">
               <strong>Facultatives :</strong>{" "}
               {format.optional_columns.map((c) => (
-                <code key={c} style={{ marginRight: 6 }}>{c}</code>
+                <code key={c}>{c}</code>
               ))}
             </p>
           )}
-          <ul className="muted" style={{ fontSize: 12, margin: "8px 0 0", paddingLeft: 18 }}>
+          <ul className="import-notes">
             {formats?.notes.map((note) => (
               <li key={note}>{note}</li>
             ))}

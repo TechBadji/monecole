@@ -271,6 +271,9 @@ def bilan(year):
         "periods": [{"date": p, "label": period_label(p)} for p in periods],
         "resources": [r.as_dict(periods) for r in resources],
         "total_resources": total_resources.as_dict(periods),
+        # Pour mémoire, hors totaux : une bourse n'est ni une recette ni une charge,
+        # c'est une recette à laquelle l'école renonce.
+        "scholarships": scholarships(year),
         "charges": [
             {**c.as_dict(periods), "weight": weight(c, total_charges.total)} for c in charges
         ],
@@ -288,6 +291,80 @@ def bilan(year):
         ],
         "headcount_total": encais["headcount_total"],
         "revenue_total": encais["revenue_total"],
+    }
+
+
+def scholarships(year):
+    """Effort social de l'établissement : bourses accordées et manque à gagner.
+
+    Aucune recette n'est enregistrée pour une bourse — la ligne est donc « pour
+    mémoire ». Elle chiffre ce que l'école renonce à percevoir, information que
+    ni le chiffre d'affaires ni les charges ne portent, et sans laquelle
+    l'administration ne peut pas arbitrer sa politique de bourses.
+    """
+    from apps.students.fees import due_map
+
+    students = list(
+        Student.objects.filter(status=StudentStatus.ACTIVE).select_related("classroom")
+    )
+    dues = due_map(year, students)
+    months = year.tuition_months
+
+    # Regroupement par taux : « 12 élèves à 100 % » se lit mieux que douze lignes.
+    buckets = {}
+    total_forgone = 0
+    full_count = 0
+    beneficiaries = 0
+    detail = []
+
+    for student in students:
+        due = dues.get(student.id)
+        if due is None or not due.has_discount:
+            continue
+        forgone = due.forgone(months)
+        if forgone <= 0:
+            continue
+
+        beneficiaries += 1
+        total_forgone += forgone
+        rate = due.scholarship_rate
+        if due.is_full_scholarship:
+            full_count += 1
+
+        bucket = buckets.setdefault(rate, {"rate": rate, "students": 0, "forgone": 0})
+        bucket["students"] += 1
+        bucket["forgone"] += forgone
+
+        detail.append(
+            {
+                "student": student.id,
+                "matricule": student.matricule,
+                "name": student.full_name,
+                "classroom": student.classroom.name,
+                "rate": rate,
+                "is_full": due.is_full_scholarship,
+                "forgone": forgone,
+                "categories": sorted({d.get_category_display() for d in due.discounts}),
+            }
+        )
+
+    # Assiette théorique : ce que l'école percevrait sans aucune bourse.
+    potential = sum(
+        (due.full_registration + due.full_monthly_tuition * months)
+        for due in dues.values()
+        if due is not None
+    )
+    effort_rate = round(total_forgone * 100 / potential, 1) if potential else 0
+
+    return {
+        "year": year.label,
+        "beneficiaries": beneficiaries,
+        "full_scholarships": full_count,
+        "total_forgone": total_forgone,
+        "potential_revenue": potential,
+        "effort_rate": effort_rate,
+        "by_rate": sorted(buckets.values(), key=lambda b: b["rate"], reverse=True),
+        "detail": sorted(detail, key=lambda d: d["forgone"], reverse=True),
     }
 
 
