@@ -44,6 +44,7 @@ export default function Encais() {
             actifs ; les inscriptions réglées sont indiquées séparément.
           </p>
         </div>
+        <div className="page-actions">
         <button
           type="button"
           className="secondary"
@@ -56,6 +57,7 @@ export default function Encais() {
         >
           Export Excel
         </button>
+        </div>
       </div>
 
       <div className="table-wrap">
@@ -136,9 +138,9 @@ export default function Encais() {
         </table>
       </div>
 
-      <div className="card" style={{ marginTop: 16 }}>
+      <div className="card">
         <div className="card-title">Chiffre d'affaires par classe</div>
-        <div className="table-wrap" style={{ border: "none" }}>
+        <div className="table-wrap">
           <table>
             <thead>
               <tr>

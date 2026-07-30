@@ -24,7 +24,7 @@ export default function Bilan() {
             {profile?.school?.name} — année scolaire {data.year}. Montants en {currency}.
           </p>
         </div>
-        <div style={{ display: "flex", gap: 8 }}>
+        <div className="page-actions">
           <button
             type="button"
             className="secondary"
@@ -117,9 +117,9 @@ export default function Bilan() {
         </table>
       </div>
 
-      <div className="card" style={{ marginTop: 16 }}>
+      <div className="card">
         <div className="card-title">Effectif et chiffre d'affaires par classe</div>
-        <div className="table-wrap" style={{ border: "none" }}>
+        <div className="table-wrap">
           <table>
             <thead>
               <tr>

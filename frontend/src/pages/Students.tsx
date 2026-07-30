@@ -56,6 +56,7 @@ export default function Students() {
           <h1>Élèves</h1>
           <p>{data ? `${data.count} élève(s)` : "…"}</p>
         </div>
+        <div className="page-actions">
         <button
           type="button"
           className="secondary"
@@ -63,6 +64,7 @@ export default function Students() {
         >
           Export Excel
         </button>
+        </div>
       </div>
 
       <div className="toolbar">
@@ -142,7 +144,7 @@ export default function Students() {
       )}
 
       {selected && ledger && (
-        <div className="card" style={{ marginTop: 16 }}>
+        <div className="card">
           <div className="card-title">
             {ledger.student.name} — {ledger.student.classroom} · {ledger.year}
           </div>

@@ -131,7 +131,7 @@ export default function ParentHome({ onSignOut }: { onSignOut: () => void }) {
             </p>
           )}
 
-          <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
+          <div className="child-actions">
             <button
               type="button"
               className="secondary"
@@ -153,7 +153,7 @@ export default function ParentHome({ onSignOut }: { onSignOut: () => void }) {
           </div>
 
           {selected === child.id && ledger.data && (
-            <div style={{ marginTop: 16 }}>
+            <div className="child-detail">
               <div className="table-wrap">
                 <table>
                   <thead>
@@ -199,7 +199,7 @@ export default function ParentHome({ onSignOut }: { onSignOut: () => void }) {
               </div>
 
               {ledger.data.discounts.length > 0 && (
-                <p className="muted" style={{ marginTop: 10, fontSize: 12 }}>
+                <p className="muted discount-note">
                   Réduction appliquée :{" "}
                   {ledger.data.discounts
                     .map((d) => `${d.kind} ${d.value} (${d.reason})`)

@@ -243,7 +243,7 @@ export default function PaymentRegister() {
 
       {!loading && rows.length > 0 && (
         <div className="table-wrap">
-          <table>
+          <table className="table-dense">
             <thead>
               <tr>
                 <th className="sticky-col">Élève</th>

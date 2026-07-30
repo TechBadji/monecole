@@ -106,7 +106,7 @@ export default function Dashboard() {
 
       <div className="card">
         <div className="card-title">Effectif et chiffre d'affaires par classe</div>
-        <div className="table-wrap" style={{ border: "none" }}>
+        <div className="table-wrap">
           <table>
             <thead>
               <tr>

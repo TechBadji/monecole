@@ -117,6 +117,7 @@ export default function Payroll() {
             revenu au barème progressif avec parts fiscales.
           </p>
         </div>
+        <div className="page-actions">
         {rows.length > 0 && (
           <button
             type="button"
@@ -131,6 +132,7 @@ export default function Payroll() {
             Tous les bulletins en PDF
           </button>
         )}
+        </div>
       </div>
 
       {scale && !scale.is_validated && (

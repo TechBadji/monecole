@@ -71,8 +71,11 @@ export default function Layout() {
             const visible = section.links.filter((link) => can(link.resource, "view"));
             if (visible.length === 0) return null;
             return (
-              <div key={section.group}>
-                <div className="nav-group">{section.group}</div>
+              // `nav-section` porte sa propre colonne flex : sans elle, les liens
+              // héritaient du flux en ligne de ce div et coulaient côte à côte,
+              // ce qui coupait « Rapport bilan » en deux et tronquait « Arriérés ».
+              <div className="nav-section" key={section.group}>
+                <h2 className="nav-group">{section.group}</h2>
                 {visible.map((link) => (
                   <NavLink
                     key={link.to}
