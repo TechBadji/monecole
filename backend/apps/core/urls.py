@@ -3,6 +3,7 @@ from rest_framework.routers import DefaultRouter
 from rest_framework_simplejwt.views import TokenRefreshView, TokenVerifyView
 
 from .import_views import DataImportView, ImportTemplateView
+from .workbook_views import WorkbookImportView
 from .views import (
     AuditLogViewSet,
     LoginView,
@@ -28,6 +29,7 @@ urlpatterns = [
     path("auth/verify/", TokenVerifyView.as_view(), name="token_verify"),
     path("auth/me/", MeView.as_view(), name="me"),
     path("imports/", DataImportView.as_view(), name="data-import"),
+    path("imports/workbook/", WorkbookImportView.as_view(), name="workbook-import"),
     path(
         "imports/template/<str:kind>.csv",
         ImportTemplateView.as_view(),

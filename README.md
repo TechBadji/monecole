@@ -171,7 +171,7 @@ comparer. Le jour où un classeur réellement renseigné sera disponible, il pou
 cd backend && .venv/bin/python manage.py test
 ```
 
-172 tests, répartis ainsi :
+253 tests, répartis ainsi :
 
 | Fichier | Objet |
 |---|---|

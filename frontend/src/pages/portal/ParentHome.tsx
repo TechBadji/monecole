@@ -14,6 +14,18 @@ type Child = {
   tariff_missing: boolean;
 };
 
+type Attendance = {
+  student: { matricule: string; name: string };
+  days: number;
+  present_days: number;
+  results: {
+    day: string;
+    arrival: string | null;
+    departure: string | null;
+    passages: number;
+  }[];
+};
+
 type Ledger = {
   student: { id: number; name: string; classroom: string };
   year: string;
@@ -44,8 +56,11 @@ function StatusBadge({ status }: { status: string }) {
   return <span className={`badge ${entry.tone}`}>{entry.label}</span>;
 }
 
+type Panel = "ledger" | "attendance";
+
 export default function ParentHome({ onSignOut }: { onSignOut: () => void }) {
   const [selected, setSelected] = useState<number | null>(null);
+  const [panel, setPanel] = useState<Panel>("ledger");
   const [paying, setPaying] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -53,8 +68,24 @@ export default function ParentHome({ onSignOut }: { onSignOut: () => void }) {
     "/portal/children/",
   );
   const ledger = useOfflineResource<Ledger>(
-    selected ? `/portal/children/${selected}/ledger/` : null,
+    selected && panel === "ledger" ? `/portal/children/${selected}/ledger/` : null,
   );
+  const attendance = useOfflineResource<Attendance>(
+    selected && panel === "attendance"
+      ? `/attendance/student/${selected}/?days=30`
+      : null,
+  );
+
+  function open(childId: number, next: Panel) {
+    // Un second clic sur le même onglet referme : c'est le geste attendu d'un
+    // bouton qui affiche déjà « Masquer ».
+    if (selected === childId && panel === next) {
+      setSelected(null);
+      return;
+    }
+    setSelected(childId);
+    setPanel(next);
+  }
 
   async function payWithWave(child: Child) {
     setPaying(child.id);
@@ -135,9 +166,20 @@ export default function ParentHome({ onSignOut }: { onSignOut: () => void }) {
             <button
               type="button"
               className="secondary"
-              onClick={() => setSelected(selected === child.id ? null : child.id)}
+              onClick={() => open(child.id, "ledger")}
             >
-              {selected === child.id ? "Masquer le détail" : "Voir le détail"}
+              {selected === child.id && panel === "ledger"
+                ? "Masquer la scolarité"
+                : "Scolarité"}
+            </button>
+            <button
+              type="button"
+              className="secondary"
+              onClick={() => open(child.id, "attendance")}
+            >
+              {selected === child.id && panel === "attendance"
+                ? "Masquer les présences"
+                : "Présences"}
             </button>
             {(child.due_now ?? 0) > 0 && (
               <button
@@ -152,7 +194,53 @@ export default function ParentHome({ onSignOut }: { onSignOut: () => void }) {
             )}
           </div>
 
-          {selected === child.id && ledger.data && (
+          {selected === child.id && panel === "attendance" && attendance.data && (
+            <div className="child-detail">
+              <p className="muted" style={{ marginBottom: "var(--space-3)" }}>
+                {attendance.data.present_days} jour(s) de présence enregistrés sur les{" "}
+                {attendance.data.days} derniers jours.
+              </p>
+              {attendance.data.results.length === 0 ? (
+                <p className="muted">
+                  Aucun passage enregistré. L'école n'utilise peut-être pas encore
+                  les cartes à badger.
+                </p>
+              ) : (
+                <div className="table-wrap">
+                  <table className="table-dense">
+                    <thead>
+                      <tr>
+                        <th>Jour</th>
+                        <th>Arrivée</th>
+                        <th>Sortie</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {attendance.data.results.map((row) => (
+                        <tr key={row.day}>
+                          <td>
+                            {new Date(row.day).toLocaleDateString("fr-FR", {
+                              weekday: "long",
+                              day: "2-digit",
+                              month: "long",
+                            })}
+                          </td>
+                          <td>{row.arrival ?? <span className="muted">—</span>}</td>
+                          <td>
+                            {row.departure ?? (
+                              <span className="muted">non badgée</span>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
+
+          {selected === child.id && panel === "ledger" && ledger.data && (
             <div className="child-detail">
               <div className="table-wrap">
                 <table>

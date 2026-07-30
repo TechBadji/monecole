@@ -204,12 +204,32 @@ class AttendanceViewSet(TenantViewSetMixin, ViewSet):
 
     resource = "attendance"
 
+    def _visible_students(self, request):
+        """Élèves que l'appelant a le droit de consulter.
+
+        Le personnel voit toute l'école ; un parent, ses seuls enfants. Le
+        rattachement vient de son numéro de téléphone, jamais d'un identifiant
+        fourni dans l'URL.
+        """
+        students = Student.objects.filter(status=StudentStatus.ACTIVE)
+        if request.user.role != Role.PARENT:
+            return students
+
+        phone = request.user.phone
+        if not phone:
+            return students.none()
+        return students.filter(
+            Q(parent_phone_e164=phone) | Q(family__phone_e164=phone)
+        ).distinct()
+
     def list(self, request):
         """Derniers passages, filtrables par jour et par classe."""
         day = request.query_params.get("day")
         classroom = request.query_params.get("classroom")
 
-        events = AttendanceEvent.objects.select_related("student", "student__classroom")
+        events = AttendanceEvent.objects.select_related(
+            "student", "student__classroom"
+        ).filter(student__in=self._visible_students(request))
         events = events.filter(day=date.fromisoformat(day)) if day else events
         if classroom:
             events = events.filter(student__classroom_id=classroom)
@@ -231,9 +251,7 @@ class AttendanceViewSet(TenantViewSetMixin, ViewSet):
         target = date.fromisoformat(day) if day else timezone.localdate()
         classroom_id = request.query_params.get("classroom")
 
-        students = Student.objects.filter(status=StudentStatus.ACTIVE).select_related(
-            "classroom"
-        )
+        students = self._visible_students(request).select_related("classroom")
         if classroom_id:
             students = students.filter(classroom_id=classroom_id)
 
@@ -289,9 +307,16 @@ class AttendanceViewSet(TenantViewSetMixin, ViewSet):
 
     @action(detail=False, methods=["get"], url_path="student/(?P<student_id>[^/.]+)")
     def student_history(self, request, student_id=None):
-        """Historique d'assiduité d'un élève, jour par jour."""
-        student = Student.objects.filter(pk=student_id).first()
+        """Historique d'assiduité d'un élève, jour par jour.
+
+        Un parent est restreint à ses propres enfants. Sans cette borne, il
+        pouvait lire les heures d'arrivée et de sortie de n'importe quel élève de
+        l'école — c'est-à-dire savoir quand un enfant qui n'est pas le sien se
+        trouve seul au portail.
+        """
+        student = self._visible_students(request).filter(pk=student_id).first()
         if student is None:
+            # 404 et non 403 : confirmer l'existence de l'élève serait déjà trop.
             raise NotFound("Élève introuvable.")
 
         days = int(request.query_params.get("days") or 30)

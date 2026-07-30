@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from "react";
 
-import { api, tokens } from "../api";
+import { api, money, tokens } from "../api";
 import { useResource } from "../hooks";
 import type { ClassRoom, Paginated } from "../types";
 
@@ -14,6 +14,23 @@ type Format = {
   needs_classroom: boolean;
 };
 type Formats = { kinds: Format[]; notes: string[] };
+
+type WorkbookReport = {
+  layout: "management" | "table";
+  applied: boolean;
+  ok: boolean;
+  students?: number;
+  classes?: { classroom: string; students: number; registration: number; tuition: number }[];
+  total_registration?: number;
+  total_tuition?: number;
+  created?: number;
+  updated?: number;
+  enrollments?: number;
+  payments?: number;
+  warning_count: number;
+  warnings: string[];
+  year: string;
+};
 
 type Report = {
   kind: string;
@@ -43,12 +60,47 @@ export default function DataImport() {
   const [classroom, setClassroom] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [report, setReport] = useState<Report | null>(null);
+  const [workbook, setWorkbook] = useState<WorkbookReport | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  /** Un .xlsx passe par la reprise de classeur, un .csv par l'import tabulaire. */
+  const isWorkbook = Boolean(file && /\.xlsx$/i.test(file.name));
 
   const format = formats?.kinds.find((f) => f.kind === kind);
   // L'application n'est proposée qu'après un pré-contrôle réussi sur ce fichier.
   const canApply = report?.dry_run && report.ok && !report.applied;
+
+  async function uploadWorkbook(dryRun: boolean) {
+    if (!file) return;
+    setBusy(true);
+    setError(null);
+
+    const body = new FormData();
+    body.append("file", file);
+    body.append("kind", kind);
+    body.append("dry_run", dryRun ? "true" : "false");
+
+    try {
+      const response = await fetch(`${API}/imports/workbook/`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${tokens.access}` },
+        body,
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        setError(data.file || data.detail || data.kind || `Erreur ${response.status}`);
+        setWorkbook(null);
+        return;
+      }
+      setWorkbook(data);
+      setReport(null);
+    } catch {
+      setError("Envoi impossible. Vérifiez votre connexion.");
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function upload(dryRun: boolean) {
     if (!file) return;
@@ -75,6 +127,7 @@ export default function DataImport() {
         return;
       }
       setReport(data);
+      setWorkbook(null);
     } catch {
       setError("Envoi impossible. Vérifiez votre connexion.");
     } finally {
@@ -84,7 +137,7 @@ export default function DataImport() {
 
   function onSubmit(event: FormEvent) {
     event.preventDefault();
-    void upload(true);
+    void (isWorkbook ? uploadWorkbook(true) : upload(true));
   }
 
   return (
@@ -135,14 +188,15 @@ export default function DataImport() {
           </div>
 
           <div className="field" style={{ minWidth: 280 }}>
-            <label htmlFor="file">Fichier CSV</label>
+            <label htmlFor="file">Fichier CSV ou Excel</label>
             <input
               id="file"
               type="file"
-              accept=".csv,text/csv"
+              accept=".csv,.xlsx,text/csv"
               onChange={(event) => {
                 setFile(event.target.files?.[0] ?? null);
                 setReport(null);
+                setWorkbook(null);
               }}
               required
             />
@@ -200,6 +254,104 @@ export default function DataImport() {
               <li key={note}>{note}</li>
             ))}
           </ul>
+        </div>
+      )}
+
+      {workbook && (
+        <div className="card">
+          <div className="card-title">
+            {workbook.applied ? "Classeur repris" : "Aperçu du classeur"}
+          </div>
+
+          {workbook.layout === "management" ? (
+            <>
+              <p className="muted" style={{ marginBottom: "var(--space-4)" }}>
+                Classeur de gestion reconnu : élèves, inscriptions et mensualités
+                sont repris depuis les onglets de classe, sur l'année {workbook.year}.
+              </p>
+
+              <div className="stats">
+                <div className="stat">
+                  <div className="label">Élèves</div>
+                  <div className="value">{workbook.students}</div>
+                </div>
+                <div className="stat">
+                  <div className="label">Inscriptions</div>
+                  <div className="value">{money(workbook.total_registration ?? 0)}</div>
+                </div>
+                <div className="stat">
+                  <div className="label">Mensualités</div>
+                  <div className="value">{money(workbook.total_tuition ?? 0)}</div>
+                </div>
+                <div className="stat">
+                  <div className="label">Avertissements</div>
+                  <div className={`value ${workbook.warning_count ? "negative" : "positive"}`}>
+                    {workbook.warning_count}
+                  </div>
+                </div>
+              </div>
+
+              {workbook.applied && (
+                <div className="alert success">
+                  {workbook.created} élève(s) créé(s), {workbook.updated} mis à jour,{" "}
+                  {workbook.enrollments} inscription(s) et {workbook.payments}{" "}
+                  encaissement(s) repris.
+                </div>
+              )}
+
+              <div className="table-wrap">
+                <table className="table-dense">
+                  <thead>
+                    <tr>
+                      <th>Classe</th>
+                      <th className="num">Élèves</th>
+                      <th className="num">Inscriptions</th>
+                      <th className="num">Mensualités</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {workbook.classes?.map((row) => (
+                      <tr key={row.classroom}>
+                        <td>{row.classroom}</td>
+                        <td className="num">{row.students}</td>
+                        <td className="num">{money(row.registration)}</td>
+                        <td className="num">{money(row.tuition)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          ) : (
+            <p className="muted">
+              Tableau simple reconnu : {workbook.created ?? 0} création(s),{" "}
+              {workbook.updated ?? 0} mise(s) à jour.
+            </p>
+          )}
+
+          {workbook.warnings.length > 0 && (
+            <>
+              <h3 style={{ margin: "var(--space-4) 0 var(--space-2)" }}>
+                Points d'attention
+              </h3>
+              <ul className="import-notes">
+                {workbook.warnings.map((note) => (
+                  <li key={note}>{note}</li>
+                ))}
+              </ul>
+            </>
+          )}
+
+          {!workbook.applied && (
+            <button
+              type="button"
+              onClick={() => void uploadWorkbook(false)}
+              disabled={busy}
+              style={{ marginTop: "var(--space-4)" }}
+            >
+              {busy ? "Reprise…" : `Reprendre ${workbook.students ?? ""} élève(s)`}
+            </button>
+          )}
         </div>
       )}
 

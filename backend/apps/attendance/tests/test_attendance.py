@@ -232,3 +232,83 @@ class AttendanceIsolationTests(TestCase):
         self.assertEqual(response.status_code, 404)
         with tenant_context(self.school_b):
             self.assertEqual(AttendanceEvent.objects.count(), 0)
+
+
+class ParentScopeTests(TestCase):
+    """Un parent ne consulte l'assiduité que de ses propres enfants.
+
+    Les heures d'arrivée et de sortie disent quand un enfant se trouve seul au
+    portail. Les exposer à d'autres familles serait plus grave qu'une fuite de
+    solde : c'est une information exploitable.
+    """
+
+    @classmethod
+    def setUpTestData(cls):
+        from apps.notifications.models import OtpCode
+
+        cls.school = make_school()
+        cls.year = make_year(cls.school)
+        cls.cp = make_classroom(cls.school, "CP")
+        cls.phone = "221771234567"
+
+        cls.mine = make_student(cls.school, cls.cp, "Awa", "Diop")
+        cls.other = make_student(cls.school, cls.cp, "Moussa", "Fall")
+        with tenant_context(cls.school):
+            cls.mine.parent_phone = "+221 77 123 45 67"
+            cls.mine.save()
+            cls.other.parent_phone = "+221 70 555 44 33"
+            cls.other.save()
+            for student in (cls.mine, cls.other):
+                AttendanceEvent.objects.create(
+                    school=cls.school, student=student,
+                    direction=AttendanceEvent.Direction.IN,
+                    occurred_at=timezone.now(),
+                )
+
+        cls.admin = make_user(cls.school, Role.ADMIN, "admin@test.sn")
+
+    def parent_client(self):
+        from django.core.cache import cache
+
+        from apps.notifications.models import OtpCode
+
+        cache.clear()
+        client = APIClient()
+        with tenant_context(self.school):
+            _, code = OtpCode.issue(self.school, self.phone)
+        response = client.post(
+            "/api/portal/auth/verify-code/",
+            {"phone": self.phone, "code": code},
+            format="json",
+        )
+        client.credentials(HTTP_AUTHORIZATION=f"Bearer {response.data['access']}")
+        return client
+
+    def test_parent_sees_only_their_own_child_history(self):
+        client = self.parent_client()
+        self.assertEqual(
+            client.get(f"/api/attendance/student/{self.mine.pk}/").status_code, 200
+        )
+        self.assertEqual(
+            client.get(f"/api/attendance/student/{self.other.pk}/").status_code, 404,
+            "Un parent ne doit pas lire les horaires d'un autre enfant.",
+        )
+
+    def test_parent_daily_sheet_lists_only_their_children(self):
+        client = self.parent_client()
+        response = client.get("/api/attendance/daily/")
+        self.assertEqual(response.status_code, 200)
+        names = [row["name"] for row in response.data["results"]]
+        self.assertEqual(names, ["Awa Diop"])
+
+    def test_parent_event_list_is_scoped(self):
+        client = self.parent_client()
+        response = client.get("/api/attendance/")
+        names = {row["student_name"] for row in response.data["results"]}
+        self.assertEqual(names, {"Awa Diop"})
+
+    def test_staff_still_sees_everyone(self):
+        client = APIClient()
+        client.force_authenticate(self.admin)
+        response = client.get("/api/attendance/daily/")
+        self.assertEqual(response.data["total"], 2)
