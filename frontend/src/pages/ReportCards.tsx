@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 
 import { api } from "../api";
 import { useResource } from "../hooks";
@@ -202,8 +202,8 @@ export default function ReportCards() {
               </thead>
               <tbody>
                 {data.results.map((result) => (
-                  <>
-                    <tr key={result.student}>
+                  <Fragment key={result.student}>
+                    <tr>
                       <td>{result.rank ? ordinal(result.rank) : <span className="muted">—</span>}</td>
                       <td className="muted">{result.matricule}</td>
                       <td>{result.name}</td>
@@ -235,7 +235,7 @@ export default function ReportCards() {
                       </td>
                     </tr>
                     {expanded === result.student && (
-                      <tr key={`${result.student}-detail`}>
+                      <tr>
                         <td colSpan={8} className="detail-cell">
                           <table className="inner-table">
                             <thead>
@@ -278,7 +278,7 @@ export default function ReportCards() {
                         </td>
                       </tr>
                     )}
-                  </>
+                  </Fragment>
                 ))}
                 {data.results.length === 0 && (
                   <tr>

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { Fragment, useState } from "react";
 
 import { api, money } from "../api";
 import { useResource } from "../hooks";
@@ -70,30 +70,40 @@ export default function Students() {
     `/students/?${query.toString()}`,
   );
 
-  const { data: ledger } = useResource<Ledger>(
-    selected
-      ? `/students/${selected}/ledger/${year ? `?year=${year}` : ""}`
-      : null,
+  const {
+    data: ledger,
+    loading: ledgerLoading,
+    error: ledgerError,
+  } = useResource<Ledger>(
+    selected ? `/students/${selected}/ledger/${year ? `?year=${year}` : ""}` : null,
   );
   const { data: history } = useResource<History>(
     selected ? `/students/${selected}/history/` : null,
   );
+
+  function toggle(studentId: number) {
+    setSelected(selected === studentId ? null : studentId);
+    setYear(null);
+  }
 
   return (
     <>
       <div className="page-head">
         <div>
           <h1>Élèves</h1>
-          <p>{data ? `${data.count} élève(s)` : "…"}</p>
+          <p>
+            {data ? `${data.count} élève(s)` : "…"} — « Situation » déplie le détail
+            financier de l'élève, année par année.
+          </p>
         </div>
         <div className="page-actions">
-        <button
-          type="button"
-          className="secondary"
-          onClick={() => api.download("/exports/students.xlsx", "liste-eleves.xlsx")}
-        >
-          Export Excel
-        </button>
+          <button
+            type="button"
+            className="secondary"
+            onClick={() => api.download("/exports/students.xlsx", "liste-eleves.xlsx")}
+          >
+            Export Excel
+          </button>
         </div>
       </div>
 
@@ -103,7 +113,7 @@ export default function Students() {
           <input
             id="search"
             value={search}
-            placeholder="Nom, prénom, parent, téléphone…"
+            placeholder="Matricule, nom, prénom, parent, téléphone…"
             onChange={(event) => setSearch(event.target.value)}
           />
         </div>
@@ -132,39 +142,73 @@ export default function Students() {
           <table>
             <thead>
               <tr>
+                <th style={{ width: 80 }}>Mat.</th>
                 <th>Nom</th>
                 <th>Classe</th>
                 <th>Parent / tuteur</th>
                 <th>Téléphone</th>
                 <th>Statut</th>
-                <th />
+                <th style={{ width: 110 }} />
               </tr>
             </thead>
             <tbody>
               {data.results.map((student) => (
-                <tr key={student.id}>
-                  <td>{student.full_name}</td>
-                  <td>{student.classroom_name}</td>
-                  <td>{student.parent_name || <span className="muted">—</span>}</td>
-                  <td>{student.parent_phone || <span className="muted">—</span>}</td>
-                  <td>{student.status === "ACTIVE" ? "Actif" : student.status}</td>
-                  <td>
-                    <button
-                      type="button"
-                      className="secondary"
-                      onClick={() => {
-                        setSelected(selected === student.id ? null : student.id);
-                        setYear(null);
-                      }}
-                    >
-                      {selected === student.id ? "Fermer" : "Situation"}
-                    </button>
-                  </td>
-                </tr>
+                <Fragment key={student.id}>
+                  <tr className={selected === student.id ? "row-open" : ""}>
+                    <td className="muted">{student.matricule}</td>
+                    <td>{student.full_name}</td>
+                    <td>{student.classroom_name}</td>
+                    <td>{student.parent_name || <span className="muted">—</span>}</td>
+                    <td>{student.parent_phone || <span className="muted">—</span>}</td>
+                    <td>{student.status === "ACTIVE" ? "Actif" : student.status}</td>
+                    <td>
+                      <button
+                        type="button"
+                        className="secondary small"
+                        aria-expanded={selected === student.id}
+                        onClick={() => toggle(student.id)}
+                      >
+                        {selected === student.id ? "Fermer" : "Situation"}
+                      </button>
+                    </td>
+                  </tr>
+
+                  {/*
+                    Le panneau se déplie sous la ligne cliquée.
+
+                    Rendu après le tableau, il atterrissait à plusieurs milliers de
+                    pixels sous le viewport sur une liste de 180 élèves : le bouton
+                    paraissait sans effet, alors que le panneau s'ouvrait bien.
+                  */}
+                  {selected === student.id && (
+                    <tr className="detail-row">
+                      <td colSpan={7} className="detail-cell">
+                        {ledgerLoading && (
+                          <div className="spinner">Chargement de la situation…</div>
+                        )}
+                        {/* Une erreur était auparavant avalée : le panneau restait
+                            vide sans rien dire. */}
+                        {ledgerError && !ledgerLoading && (
+                          <div className="situation">
+                            <div className="alert error">{ledgerError}</div>
+                          </div>
+                        )}
+                        {ledger && !ledgerLoading && (
+                          <SituationPanel
+                            ledger={ledger}
+                            history={history}
+                            year={year}
+                            onYear={setYear}
+                          />
+                        )}
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
               ))}
               {data.results.length === 0 && (
                 <tr>
-                  <td colSpan={6} className="empty">
+                  <td colSpan={7} className="empty">
                     Aucun élève ne correspond à ces critères.
                   </td>
                 </tr>
@@ -173,146 +217,148 @@ export default function Students() {
           </table>
         </div>
       )}
+    </>
+  );
+}
 
-      {selected && ledger && (
-        <div className="card">
-          <div className="card-title">
-            {ledger.student.matricule} · {ledger.student.name} —{" "}
-            {ledger.student.classroom}
-          </div>
+function SituationPanel({
+  ledger,
+  history,
+  year,
+  onYear,
+}: {
+  ledger: Ledger;
+  history: History | null;
+  year: number | null;
+  onYear: (id: number) => void;
+}) {
+  const overpaid = ledger.total_paid - ledger.total_due;
+  const activeYear = year ?? ledger.year_id;
 
-          {/* Le cursus complet : une école consulte régulièrement ce qu'un élève
-              devait les années passées, notamment avant de réinscrire. */}
-          {history && history.years.length > 1 && (
-            <div className="year-tabs">
-              {history.years.map((entry) => (
-                <button
-                  key={entry.year_id}
-                  type="button"
-                  className={`year-tab ${
-                    (year ?? history.years[0].year_id) === entry.year_id ? "active" : ""
-                  }`}
-                  onClick={() => setYear(entry.year_id)}
-                >
-                  <span className="year-label">{entry.year}</span>
-                  <span className="year-meta">
-                    {!entry.enrolled
-                      ? "non inscrit"
-                      : !entry.available
-                        ? "tarif absent"
-                        : entry.balance
-                          ? `${money(entry.balance)} dû`
-                          : "soldé"}
-                  </span>
-                </button>
-              ))}
-            </div>
-          )}
-
-          {ledger.scholarship.rate > 0 && (
-            <div className="alert success">
-              <strong>
-                {ledger.scholarship.is_full
-                  ? "Bourse totale"
-                  : `Bourse de ${ledger.scholarship.rate} %`}
-              </strong>{" "}
-              — mensualité ramenée de {money(ledger.scholarship.full_monthly_tuition)} à{" "}
-              {money(ledger.months[0]?.due ?? 0)} FCFA. Manque à gagner sur l'année :{" "}
-              {money(ledger.scholarship.forgone)} FCFA.
-            </div>
-          )}
-
-          <div className="stats">
-            <div className="stat">
-              <div className="label">Total dû — {ledger.year}</div>
-              <div className="value">{money(ledger.total_due)}</div>
-            </div>
-            <div className="stat">
-              <div className="label">Total réglé</div>
-              <div className="value">{money(ledger.total_paid)}</div>
-            </div>
-            {/* Un trop-perçu n'est pas un solde nul. Il apparaît dès qu'une bourse
-                est accordée en cours d'année à un élève ayant déjà payé plein
-                tarif : l'école doit un remboursement ou un report, et l'afficher
-                comme « 0 à payer » le lui ferait manquer. */}
-            {ledger.total_paid > ledger.total_due ? (
-              <div className="stat">
-                <div className="label">Trop-perçu</div>
-                <div className="value positive">
-                  {money(ledger.total_paid - ledger.total_due)}
-                </div>
-              </div>
-            ) : (
-              <div className="stat">
-                <div className="label">Reste à payer</div>
-                <div className={`value ${ledger.balance > 0 ? "negative" : "positive"}`}>
-                  {money(ledger.balance)}
-                </div>
-              </div>
-            )}
-          </div>
-
-          {ledger.total_paid > ledger.total_due && (
-            <div className="alert warning">
-              <strong>
-                Trop-perçu de {money(ledger.total_paid - ledger.total_due)} FCFA.
-              </strong>{" "}
-              La famille a réglé davantage que le montant dû — le plus souvent parce
-              qu'une réduction a été accordée après des versements au tarif plein.
-              À rembourser ou à reporter sur l'année suivante.
-            </div>
-          )}
-
-          <div className="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Échéance</th>
-                  <th className="num">Dû</th>
-                  <th className="num">Réglé</th>
-                  <th className="num">Solde</th>
-                  <th>État</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr>
-                  <td>Inscription</td>
-                  <td className="num">{money(ledger.registration.due)}</td>
-                  <td className="num">{money(ledger.registration.paid)}</td>
-                  <td className="num">{money(ledger.registration.balance)}</td>
-                  <td>
-                    <StatusBadge status={ledger.registration.status} />
-                  </td>
-                </tr>
-                {ledger.months.map((month) => (
-                  <tr key={month.period}>
-                    <td>
-                      {new Date(month.period).toLocaleDateString("fr-FR", {
-                        month: "long",
-                        year: "numeric",
-                      })}
-                    </td>
-                    <td className="num">{money(month.due)}</td>
-                    <td className="num">{money(month.paid)}</td>
-                    <td className="num">
-                      {month.paid > month.due ? (
-                        <span className="positive-text">
-                          +{money(month.paid - month.due)}
-                        </span>
-                      ) : (
-                        money(month.balance)
-                      )}
-                    </td>
-                    <td>
-                      <StatusBadge status={month.status} />
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+  return (
+    <div className="situation">
+      {/* Le cursus complet : une école consulte régulièrement ce qu'un élève
+          devait les années passées, notamment avant de réinscrire. */}
+      {history && history.years.length > 1 && (
+        <div className="year-tabs">
+          {history.years.map((entry) => (
+            <button
+              key={entry.year_id}
+              type="button"
+              className={`year-tab ${activeYear === entry.year_id ? "active" : ""}`}
+              onClick={() => onYear(entry.year_id)}
+            >
+              <span className="year-label">{entry.year}</span>
+              <span className="year-meta">
+                {!entry.enrolled
+                  ? "non inscrit"
+                  : !entry.available
+                    ? "tarif absent"
+                    : entry.balance
+                      ? `${money(entry.balance)} dû`
+                      : "soldé"}
+              </span>
+            </button>
+          ))}
         </div>
       )}
-    </>
+
+      {ledger.scholarship.rate > 0 && (
+        <div className="alert success">
+          <strong>
+            {ledger.scholarship.is_full
+              ? "Bourse totale"
+              : `Bourse de ${ledger.scholarship.rate} %`}
+          </strong>{" "}
+          — mensualité ramenée de {money(ledger.scholarship.full_monthly_tuition)} à{" "}
+          {money(ledger.months[0]?.due ?? 0)} FCFA. Manque à gagner sur l'année :{" "}
+          {money(ledger.scholarship.forgone)} FCFA.
+        </div>
+      )}
+
+      <div className="stats">
+        <div className="stat">
+          <div className="label">Total dû — {ledger.year}</div>
+          <div className="value">{money(ledger.total_due)}</div>
+        </div>
+        <div className="stat">
+          <div className="label">Total réglé</div>
+          <div className="value">{money(ledger.total_paid)}</div>
+        </div>
+        {/* Un trop-perçu n'est pas un solde nul : l'école doit un remboursement
+            ou un report, et « Reste à payer : 0 » le lui ferait manquer. */}
+        {overpaid > 0 ? (
+          <div className="stat">
+            <div className="label">Trop-perçu</div>
+            <div className="value positive">{money(overpaid)}</div>
+          </div>
+        ) : (
+          <div className="stat">
+            <div className="label">Reste à payer</div>
+            <div className={`value ${ledger.balance > 0 ? "negative" : "positive"}`}>
+              {money(ledger.balance)}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {overpaid > 0 && (
+        <div className="alert warning">
+          <strong>Trop-perçu de {money(overpaid)} FCFA.</strong> La famille a réglé
+          davantage que le montant dû — le plus souvent parce qu'une réduction a été
+          accordée après des versements au tarif plein. À rembourser ou à reporter
+          sur l'année suivante.
+        </div>
+      )}
+
+      <div className="table-wrap">
+        <table className="table-dense">
+          <thead>
+            <tr>
+              <th>Échéance</th>
+              <th className="num">Dû</th>
+              <th className="num">Réglé</th>
+              <th className="num">Solde</th>
+              <th>État</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Inscription</td>
+              <td className="num">{money(ledger.registration.due)}</td>
+              <td className="num">{money(ledger.registration.paid)}</td>
+              <td className="num">{money(ledger.registration.balance)}</td>
+              <td>
+                <StatusBadge status={ledger.registration.status} />
+              </td>
+            </tr>
+            {ledger.months.map((month) => (
+              <tr key={month.period}>
+                <td>
+                  {new Date(month.period).toLocaleDateString("fr-FR", {
+                    month: "long",
+                    year: "numeric",
+                  })}
+                </td>
+                <td className="num">{money(month.due)}</td>
+                <td className="num">{money(month.paid)}</td>
+                <td className="num">
+                  {month.paid > month.due ? (
+                    <span className="positive-text">
+                      +{money(month.paid - month.due)}
+                    </span>
+                  ) : (
+                    money(month.balance)
+                  )}
+                </td>
+                <td>
+                  <StatusBadge status={month.status} />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
   );
 }

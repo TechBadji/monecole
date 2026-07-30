@@ -1488,3 +1488,20 @@ tr.row-error td { background: var(--negative-soft); }
 
 /* Un montant réglé au-delà du dû : signalé, jamais confondu avec un solde nul. */
 .positive-text { color: var(--positive); font-weight: var(--weight-medium); }
+
+/* Ligne dépliée : le panneau appartient visuellement à la ligne au-dessus. */
+tr.row-open > * {
+  background: var(--brand-soft);
+  font-weight: var(--weight-medium);
+}
+
+tr.detail-row:hover > * { background: inherit; }
+
+.situation {
+  padding: var(--space-5);
+  background: var(--surface-sunken);
+  border-top: 2px solid var(--brand);
+}
+
+.situation .stats { margin-bottom: var(--space-4); }
+.situation .table-wrap { background: var(--surface); border: 1px solid var(--border); }

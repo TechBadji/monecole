@@ -38,11 +38,13 @@ class StudentSerializer(serializers.ModelSerializer):
     class Meta:
         model = Student
         fields = [
-            "id", "first_name", "last_name", "full_name", "date_of_birth", "sex",
-            "classroom", "classroom_name", "family", "parent_name", "parent_phone",
-            "parent_email", "address", "enrollment_date", "status",
-            "status_effective_date", "created_at",
+            "id", "matricule", "first_name", "last_name", "full_name",
+            "date_of_birth", "sex", "classroom", "classroom_name", "family",
+            "parent_name", "parent_phone", "parent_email", "address",
+            "enrollment_date", "status", "status_effective_date", "created_at",
         ]
+        # Attribué par le modèle, jamais soumis par le client.
+        read_only_fields = ["matricule", "created_at"]
 
     def validate(self, attrs):
         status = attrs.get("status", getattr(self.instance, "status", None))
@@ -140,8 +142,8 @@ class DiscountSerializer(serializers.ModelSerializer):
     class Meta:
         model = Discount
         fields = [
-            "id", "student", "family", "year", "kind", "scope", "value",
-            "reason", "approved_by", "approved_at", "created_at",
+            "id", "student", "family", "year", "kind", "category", "scope",
+            "value", "reason", "approved_by", "approved_at", "created_at",
         ]
 
     def validate(self, attrs):

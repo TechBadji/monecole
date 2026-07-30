@@ -34,6 +34,7 @@ export type ClassRoom = {
 
 export type Student = {
   id: number;
+  matricule: string;
   first_name: string;
   last_name: string;
   full_name: string;

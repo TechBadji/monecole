@@ -57,7 +57,9 @@ class StudentViewSet(AuditedModelViewSetMixin, TenantModelViewSet):
     serializer_class = StudentSerializer
     resource = "student"
     filterset_fields = ["classroom", "status", "family", "sex"]
-    search_fields = ["first_name", "last_name", "parent_name", "parent_phone"]
+    search_fields = [
+        "matricule", "first_name", "last_name", "parent_name", "parent_phone",
+    ]
 
     def get_queryset(self):
         qs = Student.objects.select_related("classroom", "family")
