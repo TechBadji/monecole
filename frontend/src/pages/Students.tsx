@@ -5,8 +5,15 @@ import { useResource } from "../hooks";
 import type { ClassRoom, Paginated, Student } from "../types";
 
 type Ledger = {
-  student: { id: number; name: string; classroom: string };
+  student: { id: number; matricule: string; name: string; classroom: string };
   year: string;
+  year_id: number;
+  scholarship: {
+    rate: number;
+    is_full: boolean;
+    forgone: number;
+    full_monthly_tuition: number;
+  };
   registration: { due: number; paid: number; balance: number; status: string };
   months: {
     period: string;
@@ -18,6 +25,22 @@ type Ledger = {
   total_due: number;
   total_paid: number;
   balance: number;
+};
+
+type History = {
+  student: { matricule: string; name: string };
+  years: {
+    year: string;
+    year_id: number;
+    available: boolean;
+    enrolled: boolean;
+    classroom?: string;
+    total_due?: number;
+    total_paid?: number;
+    balance?: number;
+    scholarship_rate?: number;
+    is_full_scholarship?: boolean;
+  }[];
 };
 
 const STATUS_LABELS: Record<string, string> = {
@@ -35,6 +58,8 @@ export default function Students() {
   const [search, setSearch] = useState("");
   const [classroom, setClassroom] = useState<string>("");
   const [selected, setSelected] = useState<number | null>(null);
+  // Année consultée : `null` = année courante. Permet de remonter le cursus.
+  const [year, setYear] = useState<number | null>(null);
 
   const { data: classes } = useResource<Paginated<ClassRoom>>("/classes/");
 
@@ -46,7 +71,12 @@ export default function Students() {
   );
 
   const { data: ledger } = useResource<Ledger>(
-    selected ? `/students/${selected}/ledger/` : null,
+    selected
+      ? `/students/${selected}/ledger/${year ? `?year=${year}` : ""}`
+      : null,
+  );
+  const { data: history } = useResource<History>(
+    selected ? `/students/${selected}/history/` : null,
   );
 
   return (
@@ -122,9 +152,10 @@ export default function Students() {
                     <button
                       type="button"
                       className="secondary"
-                      onClick={() =>
-                        setSelected(selected === student.id ? null : student.id)
-                      }
+                      onClick={() => {
+                        setSelected(selected === student.id ? null : student.id);
+                        setYear(null);
+                      }}
                     >
                       {selected === student.id ? "Fermer" : "Situation"}
                     </button>
@@ -146,25 +177,91 @@ export default function Students() {
       {selected && ledger && (
         <div className="card">
           <div className="card-title">
-            {ledger.student.name} — {ledger.student.classroom} · {ledger.year}
+            {ledger.student.matricule} · {ledger.student.name} —{" "}
+            {ledger.student.classroom}
           </div>
+
+          {/* Le cursus complet : une école consulte régulièrement ce qu'un élève
+              devait les années passées, notamment avant de réinscrire. */}
+          {history && history.years.length > 1 && (
+            <div className="year-tabs">
+              {history.years.map((entry) => (
+                <button
+                  key={entry.year_id}
+                  type="button"
+                  className={`year-tab ${
+                    (year ?? history.years[0].year_id) === entry.year_id ? "active" : ""
+                  }`}
+                  onClick={() => setYear(entry.year_id)}
+                >
+                  <span className="year-label">{entry.year}</span>
+                  <span className="year-meta">
+                    {!entry.enrolled
+                      ? "non inscrit"
+                      : !entry.available
+                        ? "tarif absent"
+                        : entry.balance
+                          ? `${money(entry.balance)} dû`
+                          : "soldé"}
+                  </span>
+                </button>
+              ))}
+            </div>
+          )}
+
+          {ledger.scholarship.rate > 0 && (
+            <div className="alert success">
+              <strong>
+                {ledger.scholarship.is_full
+                  ? "Bourse totale"
+                  : `Bourse de ${ledger.scholarship.rate} %`}
+              </strong>{" "}
+              — mensualité ramenée de {money(ledger.scholarship.full_monthly_tuition)} à{" "}
+              {money(ledger.months[0]?.due ?? 0)} FCFA. Manque à gagner sur l'année :{" "}
+              {money(ledger.scholarship.forgone)} FCFA.
+            </div>
+          )}
 
           <div className="stats">
             <div className="stat">
-              <div className="label">Total dû</div>
+              <div className="label">Total dû — {ledger.year}</div>
               <div className="value">{money(ledger.total_due)}</div>
             </div>
             <div className="stat">
               <div className="label">Total réglé</div>
               <div className="value">{money(ledger.total_paid)}</div>
             </div>
-            <div className="stat">
-              <div className="label">Reste à payer</div>
-              <div className={`value ${ledger.balance > 0 ? "negative" : "positive"}`}>
-                {money(ledger.balance)}
+            {/* Un trop-perçu n'est pas un solde nul. Il apparaît dès qu'une bourse
+                est accordée en cours d'année à un élève ayant déjà payé plein
+                tarif : l'école doit un remboursement ou un report, et l'afficher
+                comme « 0 à payer » le lui ferait manquer. */}
+            {ledger.total_paid > ledger.total_due ? (
+              <div className="stat">
+                <div className="label">Trop-perçu</div>
+                <div className="value positive">
+                  {money(ledger.total_paid - ledger.total_due)}
+                </div>
               </div>
-            </div>
+            ) : (
+              <div className="stat">
+                <div className="label">Reste à payer</div>
+                <div className={`value ${ledger.balance > 0 ? "negative" : "positive"}`}>
+                  {money(ledger.balance)}
+                </div>
+              </div>
+            )}
           </div>
+
+          {ledger.total_paid > ledger.total_due && (
+            <div className="alert warning">
+              <strong>
+                Trop-perçu de {money(ledger.total_paid - ledger.total_due)} FCFA.
+              </strong>{" "}
+              La famille a réglé davantage que le montant dû — le plus souvent parce
+              qu'une réduction a été accordée après des versements au tarif plein.
+              À rembourser ou à reporter sur l'année suivante.
+            </div>
+          )}
 
           <div className="table-wrap">
             <table>
@@ -197,7 +294,15 @@ export default function Students() {
                     </td>
                     <td className="num">{money(month.due)}</td>
                     <td className="num">{money(month.paid)}</td>
-                    <td className="num">{money(month.balance)}</td>
+                    <td className="num">
+                      {month.paid > month.due ? (
+                        <span className="positive-text">
+                          +{money(month.paid - month.due)}
+                        </span>
+                      ) : (
+                        money(month.balance)
+                      )}
+                    </td>
                     <td>
                       <StatusBadge status={month.status} />
                     </td>
