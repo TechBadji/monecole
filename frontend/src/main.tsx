@@ -11,6 +11,13 @@ import Login from "./pages/Login";
 // Écrans chargés à la demande. Un comptable qui saisit des encaissements n'a pas à
 // télécharger la bibliothèque de graphiques du tableau de bord, ni le module de paie.
 const Arrears = lazy(() => import("./pages/Arrears"));
+const Attendance = lazy(() => import("./pages/Attendance"));
+const Badge = lazy(() => import("./pages/Badge"));
+const Compositions = lazy(() => import("./pages/Compositions"));
+const Grades = lazy(() => import("./pages/Grades"));
+const ReportCards = lazy(() => import("./pages/ReportCards"));
+const Settings = lazy(() => import("./pages/Settings"));
+const Subjects = lazy(() => import("./pages/Subjects"));
 const AuditTrail = lazy(() => import("./pages/AuditTrail"));
 const Bilan = lazy(() => import("./pages/Bilan"));
 const Dashboard = lazy(() => import("./pages/Dashboard"));
@@ -132,6 +139,62 @@ function Root() {
           element={
             <Guarded resource="dataimport">
               <DataImport />
+            </Guarded>
+          }
+        />
+        <Route
+          path="matieres"
+          element={
+            <Guarded resource="subject">
+              <Subjects />
+            </Guarded>
+          }
+        />
+        <Route
+          path="compositions"
+          element={
+            <Guarded resource="composition">
+              <Compositions />
+            </Guarded>
+          }
+        />
+        <Route
+          path="notes"
+          element={
+            <Guarded resource="grade">
+              <Grades />
+            </Guarded>
+          }
+        />
+        <Route
+          path="bulletins"
+          element={
+            <Guarded resource="reportcard">
+              <ReportCards />
+            </Guarded>
+          }
+        />
+        <Route
+          path="badgeage"
+          element={
+            <Guarded resource="attendance">
+              <Badge />
+            </Guarded>
+          }
+        />
+        <Route
+          path="assiduite"
+          element={
+            <Guarded resource="attendance">
+              <Attendance />
+            </Guarded>
+          }
+        />
+        <Route
+          path="parametres"
+          element={
+            <Guarded resource="reportcard">
+              <Settings />
             </Guarded>
           }
         />

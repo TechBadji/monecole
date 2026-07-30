@@ -135,6 +135,84 @@ class ClassSubjectViewSet(TenantModelViewSet):
     filterset_fields = ["classroom", "year", "teacher"]
 
 
+class ClassSubjectBulkView(TenantViewSetMixin, APIView):
+    """Affectation groupée de matières à une classe.
+
+    L'administration configure une classe en une fois : cocher huit matières et
+    poser leurs coefficients, plutôt que huit créations successives.
+    """
+
+    resource = "subject"
+
+    def post(self, request):
+        if request.user.role != Role.ADMIN:
+            raise PermissionDenied("Seul un administrateur configure les matières.")
+
+        classroom_id = request.data.get("classroom")
+        year_id = request.data.get("year")
+        entries = request.data.get("subjects") or []
+
+        classroom = ClassRoom.objects.filter(pk=classroom_id).first()
+        if classroom is None:
+            raise NotFound("Classe introuvable.")
+
+        from apps.core.models import SchoolYear
+
+        year = SchoolYear.objects.filter(pk=year_id).first()
+        if year is None:
+            raise ValidationError({"year": "Année scolaire introuvable."})
+
+        created, updated, removed = 0, 0, 0
+        keep = set()
+        with transaction.atomic():
+            for order, entry in enumerate(entries):
+                subject = Subject.objects.filter(pk=entry.get("subject")).first()
+                if subject is None:
+                    continue
+                link, was_created = ClassSubject.objects.update_or_create(
+                    classroom=classroom,
+                    subject=subject,
+                    year=year,
+                    defaults={
+                        "school": request.user.school,
+                        "coefficient": int(entry.get("coefficient") or subject.default_coefficient),
+                        "teacher_id": entry.get("teacher") or None,
+                        "order": order,
+                    },
+                )
+                keep.add(link.id)
+                created += int(was_created)
+                updated += int(not was_created)
+
+            # Les matières décochées sont retirées — sauf si des notes existent
+            # déjà : les supprimer effacerait le travail des enseignants.
+            obsolete = ClassSubject.objects.filter(
+                classroom=classroom, year=year
+            ).exclude(id__in=keep)
+            protected = []
+            for link in obsolete:
+                if link.sheets.exists():
+                    protected.append(link.subject.name)
+                else:
+                    link.delete()
+                    removed += 1
+
+        return Response(
+            {
+                "created": created,
+                "updated": updated,
+                "removed": removed,
+                "protected": protected,
+                "detail": (
+                    f"{', '.join(protected)} : des notes existent, la matière est "
+                    f"conservée."
+                    if protected
+                    else None
+                ),
+            }
+        )
+
+
 class CompositionViewSet(AuditedModelViewSetMixin, TenantModelViewSet):
     serializer_class = CompositionSerializer
     resource = "composition"
@@ -351,7 +429,10 @@ class GradeEntryViewSet(TenantViewSetMixin, ViewSet):
                 {"detail": "Feuille validée. Dévalidez-la avant de corriger une note."}
             )
 
-        entries = request.data.get("rows") or []
+        entries = request.data.get("rows")
+        if entries is None and request.data.get("grade") is not None:
+            # Saisie unitaire : la charge utile porte directement la ligne.
+            entries = [request.data]
         if not isinstance(entries, list) or not entries:
             raise ValidationError({"rows": "Aucune note transmise."})
 
@@ -391,6 +472,17 @@ class GradeEntryViewSet(TenantViewSetMixin, ViewSet):
             Grade.objects.bulk_update(updates, ["value", "is_absent", "comment"])
 
         return Response({"saved": len(updates)})
+
+    @action(detail=True, methods=["post"], url_path="save-one")
+    def save_one(self, request, pk=None):
+        """Enregistre une seule note.
+
+        Complète la saisie par lot : l'enseignant qui corrige une copie isolée, ou
+        l'administration qui rattrape un absent, n'a pas à renvoyer toute la
+        classe. Même contrôle de barème que la saisie groupée — c'est le même
+        code, appelé avec une seule ligne.
+        """
+        return self.save(request, pk)
 
     @action(detail=True, methods=["post"])
     def validate_sheet(self, request, pk=None):

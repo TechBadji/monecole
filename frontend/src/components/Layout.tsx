@@ -35,6 +35,16 @@ const SECTIONS: { group: string; links: NavLinkSpec[] }[] = [
     ],
   },
   {
+    group: "Vie scolaire",
+    links: [
+      { to: "/notes", label: "Saisie des notes", resource: "grade" },
+      { to: "/bulletins", label: "Bulletins", resource: "reportcard" },
+      { to: "/compositions", label: "Compositions", resource: "composition" },
+      { to: "/badgeage", label: "Badgeage", resource: "attendance" },
+      { to: "/assiduite", label: "Assiduité", resource: "attendance" },
+    ],
+  },
+  {
     group: "Finances",
     links: [
       { to: "/depenses", label: "Dépenses", resource: "expense" },
@@ -47,7 +57,9 @@ const SECTIONS: { group: string; links: NavLinkSpec[] }[] = [
     links: [
       { to: "/enseignants", label: "Enseignants", resource: "teacher" },
       { to: "/paie", label: "Bulletins de paie", resource: "salary" },
+      { to: "/matieres", label: "Matières et coefficients", resource: "subject" },
       { to: "/import", label: "Import de données", resource: "dataimport" },
+      { to: "/parametres", label: "Paramètres", resource: "reportcard" },
       { to: "/journal", label: "Journal d'audit", resource: "auditlog" },
     ],
   },
