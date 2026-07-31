@@ -3,10 +3,19 @@ import { useEffect, useState } from "react";
 type Mode = "system" | "light" | "dark";
 const KEY = "monecole.theme";
 
+/* Libellé court : la bascule vit dans le menu de la vignette, large de 228 px,
+   où « Thème : système » débordait. La ligne porte déjà le mot « Apparence », et
+   la phrase entière reste dans l'`aria-label`. */
 const LABELS: Record<Mode, string> = {
-  system: "Thème : système",
-  light: "Thème : clair",
-  dark: "Thème : sombre",
+  system: "Système",
+  light: "Clair",
+  dark: "Sombre",
+};
+
+const SPOKEN: Record<Mode, string> = {
+  system: "thème système",
+  light: "thème clair",
+  dark: "thème sombre",
 };
 
 /**
@@ -39,7 +48,7 @@ export default function ThemeToggle() {
       type="button"
       className="theme-toggle"
       onClick={() => setMode(next[mode])}
-      aria-label={`${LABELS[mode]}. Cliquer pour passer à « ${LABELS[next[mode]]} ».`}
+      aria-label={`Apparence : ${SPOKEN[mode]}. Cliquer pour passer au ${SPOKEN[next[mode]]}.`}
     >
       {LABELS[mode]}
     </button>

@@ -17,8 +17,15 @@ export type Role =
 export type Profile = {
   id: number;
   email: string;
+  first_name: string;
+  last_name: string;
   full_name: string;
+  phone: string;
+  /** Chemin relatif à l'API, pas à l'interface — voir `absolute()`. */
+  photo: string | null;
+  initials: string;
   role: Role;
+  role_label: string;
   school: { id: number; name: string; currency: string } | null;
   permissions: Record<string, string[]>;
 };

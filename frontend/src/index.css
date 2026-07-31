@@ -165,13 +165,13 @@
 /* La barre latérale garde un marine profond dans les deux modes : c'est
    l'ancrage de l'identité, et il tient sur fond clair comme sombre. */
 :root[data-theme="dark"] .sidebar,
-:root[data-theme="dark"] .login {
+:root[data-theme="dark"] .access {
   --brand: #1a2942;
 }
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) .sidebar,
-  :root:not([data-theme="light"]) .login {
+  :root:not([data-theme="light"]) .access {
     --brand: #1a2942;
   }
 }
@@ -259,11 +259,17 @@ input[type="number"],
   padding: var(--space-5) var(--space-3);
   background: var(--brand);
   color: var(--on-brand);
-  overflow-y: auto;
+  /* La barre elle-même ne défile pas : c'est la liste des liens qui défile,
+     entre un en-tête et un pied fixes. Avec `overflow-y` posé ici, le pied
+     partait sous la ligne de flottaison dès que les liens dépassaient la
+     hauteur de l'écran — mesuré à 286 px hors champ sur un portable de
+     713 px —, et la vignette qui porte la déconnexion devenait introuvable. */
+  overflow: hidden;
   overscroll-behavior: contain;
 }
 
 .brand {
+  flex-shrink: 0;
   padding: 0 var(--space-2);
   font-size: var(--text-md);
   font-weight: var(--weight-semibold);
@@ -283,6 +289,14 @@ input[type="number"],
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
+  /* `min-height: 0` est indispensable : un élément flex refuse par défaut de
+     descendre sous la taille de son contenu, et sans lui la zone ne défile
+     pas, elle pousse. */
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
 }
 
 /* Chaque section porte sa propre colonne : c'est ce qui manquait, et les liens
@@ -358,7 +372,7 @@ input[type="number"],
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
-  margin-top: auto;
+  flex-shrink: 0;
   padding-top: var(--space-4);
   border-top: 1px solid rgb(255 255 255 / 12%);
 }
@@ -727,19 +741,24 @@ button.link:hover:not(:disabled) {
 
 button.link.danger { color: var(--negative); }
 
+/* La bascule vit désormais dans le menu de la vignette, sur surface claire.
+   Elle portait encore les couleurs du fond marine — blanc à 72 % — et y était
+   proprement invisible. */
 .theme-toggle {
   justify-content: flex-start;
-  padding: 5px var(--space-3);
+  padding: 4px var(--space-3);
   background: transparent;
-  border-color: rgb(255 255 255 / 20%);
-  color: var(--on-brand-muted);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-full);
+  color: var(--text-secondary);
   font-size: var(--text-sm);
+  white-space: nowrap;
 }
 
 .theme-toggle:hover:not(:disabled) {
-  background: rgb(255 255 255 / 6%);
-  border-color: rgb(255 255 255 / 36%);
-  color: var(--on-brand);
+  background: var(--surface-sunken);
+  border-color: var(--muted);
+  color: var(--text);
 }
 
 /* ==========================================================================
@@ -781,60 +800,726 @@ button.link.danger { color: var(--negative); }
 }
 
 /* ==========================================================================
-   Connexion
+   Écrans d'accès — connexion, mot de passe oublié, réinitialisation
+   ==========================================================================
+
+   Contrat de direction en tête de `pages/Login.tsx`.
+
+   La fiche remplace la carte centrée du SaaS générique. Ses champs sont des
+   lignes réglées surmontées d'une étiquette : la grammaire des formulaires
+   d'inscription que ces écoles remplissent à la main. Aucun cadre de saisie,
+   aucune ombre décorative — la seule profondeur est celle de la fiche posée
+   sur le marine.
    ========================================================================== */
 
-.login {
+.access {
+  display: grid;
+  /* Placement explicite : l'accroche et les garanties occupent deux rangées de
+     la colonne de gauche, la fiche les enjambe à droite. `align-content`
+     centre le couple, chaque bloc gardant sa hauteur propre. */
+  grid-template-columns: 1fr min(48%, 560px);
+  grid-template-rows: auto auto;
+  align-content: center;
+  min-height: 100vh;
+  background: var(--brand);
+  /* Deux nappes très douces empêchent l'aplat marine de paraître mort sur un
+     grand écran, sans devenir le dégradé décoratif de rigueur. */
+  background-image:
+    radial-gradient(120% 90% at 8% 0%, rgb(255 255 255 / 9%), transparent 60%),
+    radial-gradient(90% 80% at 100% 100%, rgb(0 0 0 / 22%), transparent 55%);
+  color: var(--on-brand);
+}
+
+/* --- Volet vitrine -------------------------------------------------------- */
+
+.access-pitch {
+  grid-column: 1;
+  grid-row: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: var(--space-5);
+  padding: var(--space-10) clamp(var(--space-8), 6vw, 88px) 0;
+}
+
+.access-proof-zone {
+  grid-column: 1;
+  grid-row: 2;
+  padding: 0 clamp(var(--space-8), 6vw, 88px) var(--space-10);
+}
+
+.access-brand {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  font-size: 19px;
+  font-weight: var(--weight-semibold);
+  letter-spacing: -0.015em;
+}
+
+.access-headline {
+  max-width: 15ch;
+  margin: 0;
+  /* La règle globale `h1, h2, h3, h4` pose `color: var(--text)` et bat
+     l'héritage du blanc de `.access` : sans cette ligne, le titre est en
+     quasi-noir sur le marine. */
+  color: var(--on-brand);
+  font-size: clamp(30px, 3.9vw, 50px);
+  font-weight: var(--weight-semibold);
+  line-height: 1.08;
+  /* Plancher de crénage : en dessous, les capitales accentuées se touchent. */
+  letter-spacing: -0.032em;
+  text-wrap: balance;
+}
+
+.access-lede {
+  max-width: 46ch;
+  margin: 0;
+  font-size: var(--text-md);
+  line-height: var(--leading-normal);
+  color: rgb(255 255 255 / 76%);   /* 6,2:1 sur le marine */
+}
+
+.access-proof {
+  display: grid;
+  gap: var(--space-4);
+  max-width: 54ch;
+  margin: var(--space-6) 0 0;
+  padding: var(--space-5) 0 0;
+  border-top: 1px solid rgb(255 255 255 / 16%);
+  list-style: none;
+}
+
+.access-proof li {
+  font-size: var(--text-base);
+  line-height: 1.55;
+  color: rgb(255 255 255 / 74%);
+}
+
+.access-proof strong {
+  color: var(--on-brand);
+  font-weight: var(--weight-semibold);
+}
+
+/* --- La fiche ------------------------------------------------------------- */
+
+.access-card-zone {
+  grid-column: 2;
+  grid-row: 1 / span 2;
   display: grid;
   place-items: center;
-  min-height: 100vh;
-  padding: var(--space-5);
+  padding: var(--space-10) clamp(var(--space-5), 4vw, var(--space-10));
+}
+
+.fiche {
+  position: relative;
+  width: 100%;
+  max-width: 430px;
+  padding: var(--space-8) var(--space-8) var(--space-10);
+  background: var(--surface);
+  color: var(--text);
+  border-radius: 4px;   /* du carton coupé, pas une pastille */
+  /* Le cachet est posé sur la fiche, pas à cheval sur son bord : sans cette
+     coupe il débordait sur le marine et paraissait tronqué. */
+  overflow: hidden;
+  box-shadow:
+    0 18px 44px rgb(6 14 30 / 34%),
+    0 3px 10px rgb(6 14 30 / 22%);
+}
+
+/* Le bord gauche imite la marge encrée d'un formulaire administratif. */
+.fiche::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 3px;
+  border-radius: 4px 0 0 4px;
   background: var(--brand);
 }
 
-.login-card {
+.fiche-head {
+  margin-bottom: var(--space-6);
+  padding-bottom: var(--space-4);
+  border-bottom: 1.5px solid var(--text);
+}
+
+.fiche-ref {
+  display: block;
+  margin-bottom: var(--space-2);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  color: var(--muted);
+}
+
+.fiche-head h2 {
+  margin: 0;
+  font-size: 21px;
+  font-weight: var(--weight-semibold);
+  letter-spacing: -0.02em;
+}
+
+.fiche-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+
+/* Le champ réglé : la saisie se pose sur une ligne, elle n'entre pas dans une
+   boîte. C'est ce trait qui distingue cet écran du reste de l'application, où
+   les cadres sont justes parce qu'on y saisit des tableaux entiers. */
+.ruled .field {
+  gap: 2px;
+}
+
+.ruled input {
+  padding: var(--space-2) 0;
+  background: transparent;
+  border: 0;
+  border-bottom: 1.5px solid var(--border-strong);
+  border-radius: 0;
+  font-size: var(--text-md);
+  transition: border-color 0.14s ease, box-shadow 0.14s ease;
+}
+
+.ruled input:hover {
+  border-bottom-color: var(--muted);
+}
+
+.ruled input:focus,
+.ruled input:focus-visible {
+  outline: 0;
+  border-bottom-color: var(--brand);
+  box-shadow: 0 1.5px 0 var(--brand);
+}
+
+.ruled .password-input input {
+  padding-right: 34px;
+}
+
+.fiche-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+}
+
+.fiche-row.centered {
+  justify-content: center;
+}
+
+.fiche-prose {
+  margin: 0;
+  font-size: var(--text-base);
+  line-height: 1.6;
+  color: var(--text-secondary);
+}
+
+.fiche-submit {
   width: 100%;
-  max-width: 384px;
-  padding: var(--space-8);
+  padding: 11px var(--space-4);
+  font-size: var(--text-md);
+}
+
+/* Un lien qui doit peser autant qu'un bouton : même boîte, même repos. */
+.fiche-submit.as-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--brand);
+  color: var(--on-brand);
+  border: 1px solid var(--brand);
+  border-radius: var(--radius-sm);
+  font-weight: var(--weight-medium);
+  text-decoration: none;
+}
+
+.fiche-submit.as-link:hover {
+  background: var(--brand-hover);
+  border-color: var(--brand-hover);
+}
+
+.fiche-note {
+  margin: calc(var(--space-2) * -1) 0 0;
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+/* --- Le cachet ------------------------------------------------------------
+   Seul moment de mise en scène de l'écran, et seule animation. Il se pose une
+   fois, en sortie exponentielle. */
+
+.cachet {
+  position: absolute;
+  /* En bas de fiche, le cachet passait sous le bouton d'action, plein marine,
+     qui en masquait la moitié : le disque paraissait tronqué. L'angle
+     supérieur est de toute façon l'endroit où un cachet se pose sur un
+     formulaire, et il n'y entre en conflit avec rien. */
+  top: 18px;
+  right: 18px;
+  color: var(--brand);
+  opacity: 0.13;
+  transform: rotate(-11deg);
+  pointer-events: none;
+  animation: cachet-pose 620ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@keyframes cachet-pose {
+  from { opacity: 0; transform: rotate(-24deg) scale(1.5); }
+  to   { opacity: 0.13; transform: rotate(-11deg) scale(1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cachet { animation: none; }
+}
+
+.cachet-ring {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 3;
+}
+
+.cachet-ring.thin { stroke-width: 1.2; }
+
+.cachet-arc-text {
+  fill: currentColor;
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+}
+
+.cachet-label {
+  fill: currentColor;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.2em;
+}
+
+.cachet-year {
+  fill: currentColor;
+  font-size: 17px;
+  font-weight: 700;
+}
+
+/* --- Adaptation -----------------------------------------------------------
+   Sous 900 px la vitrine passe au-dessus de la fiche et se réduit à ce qui se
+   lit debout. Les quatre garanties restent sous la fiche pour qui déroule :
+   elles ne valent pas de repousser le formulaire hors de l'écran. */
+
+@media (max-width: 900px) {
+  /* En colonne unique, `order` porte enfin : les trois sections sont des frères
+     directs, et la fiche se glisse entre l'accroche et les garanties plutôt que
+     d'attendre sous un écran entier de texte. */
+  .access {
+    display: flex;
+    flex-direction: column;
+    min-height: 100dvh;
+  }
+
+  .access-pitch {
+    order: 1;
+    gap: var(--space-4);
+    padding: var(--space-8) var(--space-5) 0;
+  }
+
+  .access-card-zone { order: 2; }
+  .access-proof-zone { order: 3; }
+
+  .access-headline { font-size: clamp(26px, 7vw, 34px); }
+
+  .access-proof {
+    margin-top: 0;
+  }
+
+  .access-proof-zone {
+    padding: 0 var(--space-5) var(--space-10);
+  }
+
+  .access-card-zone {
+    padding: var(--space-6) var(--space-5) var(--space-8);
+  }
+
+  .fiche {
+    max-width: 460px;
+    padding: var(--space-6) var(--space-5) var(--space-8);
+  }
+
+  .cachet { transform: rotate(-11deg) scale(0.8); }
+}
+
+/* Le clavier logiciel ampute la moitié de la hauteur utile : la vitrine cède
+   la place, la fiche reste seule à l'écran. */
+@media (max-width: 900px) and (max-height: 620px) {
+  .access-pitch { display: none; }
+}
+
+/* ==========================================================================
+   Champ de mot de passe
+   ========================================================================== */
+
+.password-input {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.password-input input {
+  width: 100%;
+  padding-right: 36px;
+}
+
+.password-toggle {
+  position: absolute;
+  right: 0;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  background: none;
+  border: 0;
+  border-radius: var(--radius-sm);
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.password-toggle:hover {
+  background: none;
+  color: var(--text);
+}
+
+.password-input.has-error input {
+  border-color: var(--negative);
+  border-bottom-color: var(--negative);
+}
+
+.field-hint {
+  margin: 2px 0 0;
+  font-size: var(--text-sm);
+  line-height: 1.45;
+  color: var(--muted);
+}
+
+.field-error {
+  margin: 2px 0 0;
+  font-size: var(--text-sm);
+  line-height: 1.45;
+  color: var(--negative);
+}
+
+.checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-base);
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.checkbox input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--brand);
+  cursor: pointer;
+}
+
+.quiet-link {
+  font-size: var(--text-base);
+  color: var(--text-secondary);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  text-decoration-color: var(--border-strong);
+}
+
+.quiet-link:hover {
+  color: var(--brand);
+  text-decoration-color: currentColor;
+}
+
+/* ==========================================================================
+   Vignette utilisateur et son menu
+   ========================================================================== */
+
+.avatar {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  border-radius: var(--radius-full);
+  object-fit: cover;
+  background: var(--brand-soft);
+  color: var(--brand);
+  font-weight: var(--weight-semibold);
+  letter-spacing: 0.01em;
+  /* Un liseré fin détache la photo du marine comme du blanc. */
+  box-shadow: 0 0 0 1px rgb(0 0 0 / 8%);
+}
+
+.user-chip-holder {
+  position: relative;
+}
+
+.user-chip {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  padding: var(--space-2);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  color: var(--on-brand);
+  text-align: left;
+  cursor: pointer;
+}
+
+.user-chip:hover,
+.user-chip.open {
+  background: rgb(255 255 255 / 9%);
+  border-color: rgb(255 255 255 / 12%);
+}
+
+.user-chip .avatar {
+  background: rgb(255 255 255 / 16%);
+  color: var(--on-brand);
+  box-shadow: 0 0 0 1px rgb(255 255 255 / 18%);
+}
+
+.user-chip-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;   /* sans quoi un nom long pousse le chevron hors du cadre */
+  line-height: 1.3;
+}
+
+.user-chip-text strong {
+  overflow: hidden;
+  font-size: var(--text-base);
+  font-weight: var(--weight-medium);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.user-chip-text span {
+  font-size: var(--text-sm);
+  color: var(--on-brand-faint);
+}
+
+.user-chip-caret {
+  flex-shrink: 0;
+  margin-left: auto;
+  color: var(--on-brand-faint);
+  transition: transform 0.16s ease;
+}
+
+.user-chip.open .user-chip-caret {
+  transform: rotate(180deg);
+}
+
+/* Le menu s'ouvre vers le haut : la vignette est déjà au bas de l'écran. */
+.user-menu {
+  position: absolute;
+  bottom: calc(100% + var(--space-2));
+  left: 0;
+  right: 0;
+  z-index: 30;
+  padding: var(--space-2);
   background: var(--surface);
-  border-radius: var(--radius-lg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
   box-shadow: var(--shadow-lg);
 }
 
-.login-card h1 {
-  margin-bottom: var(--space-1);
+.user-menu-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-2) var(--space-3);
+  margin-bottom: var(--space-2);
+  border-bottom: 1px solid var(--border);
 }
 
-.login-card > p {
-  margin-bottom: var(--space-6);
+.user-menu-head > div {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.35;
+}
+
+.user-menu-head strong {
+  overflow: hidden;
+  font-size: var(--text-base);
+  color: var(--text);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.user-menu-head span {
+  overflow: hidden;
+  font-size: var(--text-sm);
+  color: var(--muted);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.user-menu > button {
+  display: block;
+  width: 100%;
+  padding: var(--space-2) var(--space-2);
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-size: var(--text-base);
+  font-weight: var(--weight-normal);
+  text-align: left;
+  cursor: pointer;
+}
+
+.user-menu > button:hover {
+  background: var(--surface-sunken);
+}
+
+.user-menu > button.danger {
+  color: var(--negative);
+}
+
+.user-menu > button.danger:hover {
+  background: var(--negative-soft);
+}
+
+.user-menu-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-2);
+  margin: var(--space-1) 0;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
   font-size: var(--text-base);
   color: var(--text-secondary);
 }
 
-.login-card .field {
-  margin-bottom: var(--space-4);
+/* ==========================================================================
+   Mon compte
+   ========================================================================== */
+
+.account-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+  gap: var(--space-5);
+  align-items: start;
 }
 
-.login-card button[type="submit"] {
-  width: 100%;
-  margin-top: var(--space-2);
-  padding: 9px var(--space-4);
+.account-grid .card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
 }
 
-.hint {
-  margin-top: var(--space-6);
-  padding-top: var(--space-4);
+.account-grid .card h2 {
+  margin: 0;
+  font-size: var(--text-lg);
+  font-weight: var(--weight-semibold);
+}
+
+.account-photo-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-5);
+  flex-wrap: wrap;
+}
+
+.account-photo-row > div {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 200px;
+  flex: 1;
+}
+
+.field-pair {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-4);
+}
+
+.readonly-pair {
+  padding-top: var(--space-3);
   border-top: 1px solid var(--border);
+}
+
+.readonly-value {
+  margin: 0;
+  padding: 7px 0;
+  font-size: var(--text-base);
+  color: var(--text-secondary);
+}
+
+.saved-flag {
+  align-self: center;
+  font-size: var(--text-base);
+  color: var(--positive);
+}
+
+.session-list {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.session-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: var(--space-3) 0;
+  border-top: 1px solid var(--border);
+}
+
+.session-list li:first-child {
+  border-top: 0;
+}
+
+.session-list li > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.session-list strong {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-base);
+  font-weight: var(--weight-medium);
+}
+
+.session-meta {
   font-size: var(--text-sm);
-  line-height: 1.7;
   color: var(--muted);
 }
 
-.hint code {
-  padding: 1px 5px;
-  background: var(--surface-sunken);
-  border-radius: 3px;
+.chip {
+  padding: 1px 7px;
+  background: var(--brand-soft);
+  border-radius: var(--radius-full);
   font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  color: var(--brand);
+}
+
+@media (max-width: 620px) {
+  .field-pair {
+    grid-template-columns: 1fr;
+  }
 }
 
 .otp-input {
@@ -1112,7 +1797,18 @@ button.link.danger { color: var(--negative); }
     align-items: center;
     gap: var(--space-4);
     padding: var(--space-3) var(--space-4);
-    overflow-x: auto;
+    /* `clip` et non `auto` : c'est la seule valeur qui borne un axe sans forcer
+       l'autre à devenir un conteneur de défilement. Avec `overflow-x: auto`, le
+       navigateur rendait `overflow-y` non visible et découpait le menu de la
+       vignette à la hauteur du bandeau ; en `visible`, la barre poussait la
+       page en débordement horizontal. C'est `.nav` qui défile. */
+    overflow-x: clip;
+    overflow-y: visible;
+    /* Indispensable : un élément de grille refuse par défaut de descendre sous
+       la largeur de son contenu. Sans lui, la barre mesure la somme de ses
+       17 liens — 2 400 px — et pousse la page entière en débordement
+       horizontal, `overflow-x: clip` ne coupant que le rendu, pas la taille. */
+    min-width: 0;
   }
 
   .nav {
@@ -1201,9 +1897,6 @@ button.link.danger { color: var(--negative); }
     padding: var(--space-4);
   }
 
-  .login-card {
-    padding: var(--space-6);
-  }
 }
 
 @media print {
@@ -1289,15 +1982,34 @@ input.cell {
   .sidebar-footer {
     flex-shrink: 0;
   }
-}
 
-/* Sous 700 px, le sélecteur de thème cède la place aux liens : il reste
-   accessible ailleurs, et le réglage système fait défaut. */
-@media (max-width: 700px) {
-  .theme-toggle {
-    display: none;
+  /* En barre horizontale, la vignette est en **haut** de l'écran : le menu doit
+     s'ouvrir vers le bas. Conservé vers le haut, il sortait du cadre par le
+     dessus et n'était plus atteignable. */
+  .user-menu {
+    top: calc(100% + var(--space-2));
+    bottom: auto;
+    left: auto;
+    right: 0;
+    width: 250px;
+  }
+
+  /* Dans la barre, la vignette se dimensionne à son contenu au lieu d'occuper
+     toute la largeur disponible. */
+  .user-chip {
+    width: auto;
+  }
+
+  .user-chip-text strong {
+    max-width: 140px;
   }
 }
+
+/* La règle qui masquait la bascule sous 700 px a été retirée : elle datait de
+   l'époque où elle occupait le pied de la barre, en concurrence avec les liens.
+   Dans le menu de la vignette elle ne gêne plus rien, et la masquer privait les
+   téléphones du seul réglage de thème — « il reste accessible ailleurs »
+   n'était plus vrai. */
 
 /* Écran d'import : listes de colonnes et notes de format. */
 .column-list {

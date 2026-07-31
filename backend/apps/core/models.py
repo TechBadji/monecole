@@ -1,7 +1,12 @@
+import hashlib
+import secrets
+from datetime import timedelta
+
 from django.conf import settings
 from django.contrib.auth.models import AbstractUser, BaseUserManager
 from django.core.validators import MinValueValidator
 from django.db import models
+from django.utils import timezone
 
 from .tenancy import TenantScopedModel
 
@@ -167,6 +172,7 @@ class User(AbstractUser):
     first_name = models.CharField("prénom", max_length=150, blank=True)
     last_name = models.CharField("nom", max_length=150, blank=True)
     phone = models.CharField("téléphone", max_length=30, blank=True)
+    photo = models.ImageField("photo", upload_to="avatars/", null=True, blank=True)
     role = models.CharField("rôle", max_length=20, choices=Role.choices, default=Role.SECRETARY)
     school = models.ForeignKey(
         School,
@@ -192,6 +198,112 @@ class User(AbstractUser):
     @property
     def is_super_admin(self):
         return self.role == Role.SUPER_ADMIN
+
+    @property
+    def initials(self):
+        """Repli quand aucune photo n'est chargée.
+
+        L'email sert de dernier recours : un compte peut exister sans état civil
+        renseigné, et une vignette vide ne désigne personne.
+        """
+        parts = [self.first_name.strip(), self.last_name.strip()]
+        letters = "".join(part[0] for part in parts if part)
+        return (letters or self.email[:2]).upper()
+
+
+class PasswordResetToken(models.Model):
+    """Jeton de réinitialisation, à usage unique et de courte durée.
+
+    Le jeton n'est **pas** stocké en clair : seul son condensé l'est. Une fuite
+    de la table ne permet donc pas de prendre la main sur un compte, alors que
+    ces lignes vivent à côté des adresses email de tout le personnel.
+    """
+
+    TTL = timedelta(hours=2)
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="reset_tokens"
+    )
+    token_hash = models.CharField(max_length=64, unique=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField()
+    used_at = models.DateTimeField(null=True, blank=True)
+    requested_ip = models.GenericIPAddressField(null=True, blank=True)
+
+    class Meta:
+        verbose_name = "jeton de réinitialisation"
+        verbose_name_plural = "jetons de réinitialisation"
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"Réinitialisation pour {self.user.email}"
+
+    @staticmethod
+    def hash(raw: str) -> str:
+        return hashlib.sha256(raw.encode()).hexdigest()
+
+    @classmethod
+    def issue(cls, user, ip=None):
+        """Émet un jeton et renvoie `(instance, valeur en clair)`.
+
+        La valeur en clair n'existe qu'ici et dans le message envoyé : elle
+        n'est jamais réécrite en base ni journalisée.
+        """
+        raw = secrets.token_urlsafe(32)
+        instance = cls.objects.create(
+            user=user,
+            token_hash=cls.hash(raw),
+            expires_at=timezone.now() + cls.TTL,
+            requested_ip=ip,
+        )
+        return instance, raw
+
+    @property
+    def is_usable(self):
+        return self.used_at is None and self.expires_at > timezone.now()
+
+
+class LoginSession(models.Model):
+    """Une session ouverte sur un appareil.
+
+    Sert à deux choses que le seul jeton JWT ne permet pas : montrer à
+    l'utilisateur où son compte est connecté, et **révoquer** un appareil. Un
+    JWT est autoporteur — sans cette table, un jeton volé reste valide jusqu'à
+    son expiration et rien ne peut l'interrompre.
+    """
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="sessions"
+    )
+    # Volontairement **pas** le `jti` du jeton : celui-ci change à chaque
+    # rafraîchissement, et la session serait perdue au bout de trente minutes.
+    # `sid` est posé à la connexion et recopié de rafraîchissement en
+    # rafraîchissement, car SimpleJWT reporte les revendications personnalisées
+    # du jeton de rafraîchissement vers le jeton d'accès.
+    sid = models.CharField("identifiant de session", max_length=64, unique=True)
+    device_label = models.CharField("appareil", max_length=120, blank=True)
+    ip_address = models.GenericIPAddressField(null=True, blank=True)
+    remembered = models.BooleanField(
+        "session prolongée",
+        default=False,
+        help_text="Case « se souvenir de moi » cochée à la connexion.",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    last_seen_at = models.DateTimeField(auto_now=True)
+    expires_at = models.DateTimeField()
+    revoked_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        verbose_name = "session de connexion"
+        verbose_name_plural = "sessions de connexion"
+        ordering = ["-last_seen_at"]
+
+    def __str__(self):
+        return f"{self.device_label or 'Appareil inconnu'} — {self.user.email}"
+
+    @property
+    def is_active(self):
+        return self.revoked_at is None and self.expires_at > timezone.now()
 
 
 class AuditLog(models.Model):

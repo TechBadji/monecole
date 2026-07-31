@@ -104,7 +104,7 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": (
-        "rest_framework_simplejwt.authentication.JWTAuthentication",
+        "apps.core.authentication.SessionAwareJWTAuthentication",
     ),
     "DEFAULT_PERMISSION_CLASSES": ("apps.core.permissions.RoleBasedPermission",),
     "DEFAULT_FILTER_BACKENDS": (
@@ -120,15 +120,25 @@ REST_FRAMEWORK = {
     ),
     "DEFAULT_THROTTLE_RATES": {
         "login": "10/min",
+        # Chaque demande envoie un email à une adresse que le demandeur choisit :
+        # sans borne, le formulaire sert à inonder la boîte d'un tiers.
+        "password_reset": "5/hour",
         # L'envoi d'un code coûte un SMS : on borne les demandes par numéro.
         "otp": "5/hour",
         "sms": "20/min",
     },
 }
 
+# Durées de session. « Se souvenir de moi » coché : 30 jours. Décoché : une
+# journée côté serveur, mais le client garde le jeton en mémoire de session, si
+# bien que fermer le navigateur suffit à couper — ce qui compte sur le poste
+# partagé d'un secrétariat.
+REMEMBERED_REFRESH_LIFETIME = timedelta(days=30)
+SESSION_REFRESH_LIFETIME = timedelta(days=1)
+
 SIMPLE_JWT = {
     "ACCESS_TOKEN_LIFETIME": timedelta(minutes=30),
-    "REFRESH_TOKEN_LIFETIME": timedelta(days=7),
+    "REFRESH_TOKEN_LIFETIME": REMEMBERED_REFRESH_LIFETIME,
     "ROTATE_REFRESH_TOKENS": True,
     "BLACKLIST_AFTER_ROTATION": False,
     "AUTH_HEADER_TYPES": ("Bearer",),
@@ -190,3 +200,23 @@ LOGGING = {
     },
     "root": {"handlers": ["console"], "level": "INFO"},
 }
+
+
+# --- Messagerie --------------------------------------------------------------
+# Sert à la réinitialisation de mot de passe, seul usage courrier du produit.
+#
+# Sans EMAIL_HOST renseigné, Django écrit les messages sur la sortie standard :
+# commode en développement, **inopérant en production**. Une mise en service
+# demande un SMTP et un domaine expéditeur avec SPF et DKIM, faute de quoi les
+# messages partiront en indésirables — voir docs/messagerie.md.
+EMAIL_HOST = os.getenv("EMAIL_HOST", "")
+EMAIL_BACKEND = (
+    "django.core.mail.backends.smtp.EmailBackend"
+    if EMAIL_HOST
+    else "django.core.mail.backends.console.EmailBackend"
+)
+EMAIL_PORT = int(os.getenv("EMAIL_PORT", "587"))
+EMAIL_HOST_USER = os.getenv("EMAIL_HOST_USER", "")
+EMAIL_HOST_PASSWORD = os.getenv("EMAIL_HOST_PASSWORD", "")
+EMAIL_USE_TLS = os.getenv("EMAIL_USE_TLS", "1") == "1"
+DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", "MonEcole <ne-pas-repondre@monecole.sn>")

@@ -1,4 +1,8 @@
+from uuid import uuid4
+
+from django.conf import settings
 from django.contrib.auth import get_user_model
+from django.utils import timezone
 from rest_framework import serializers
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
@@ -106,21 +110,52 @@ class LoginSerializer(TokenObtainPairSerializer):
     adapter la navigation au rôle dès la connexion.
     """
 
+    # Non déclaré comme champ du sérialiseur parent : `TokenObtainPairSerializer`
+    # ne connaît que l'identifiant et le mot de passe.
+    remember_me = serializers.BooleanField(required=False, default=False)
+
     @classmethod
     def get_token(cls, user):
         token = super().get_token(user)
         token["role"] = user.role
         token["school_id"] = user.school_id
+        # Identifiant de session, stable pour toute la durée de vie de la
+        # connexion. SimpleJWT recopie les revendications personnalisées du
+        # jeton de rafraîchissement vers chaque jeton d'accès qu'il engendre,
+        # ce qui le fait survivre aux renouvellements — contrairement au `jti`.
+        token["sid"] = uuid4().hex
         return token
 
     def validate(self, attrs):
-        data = super().validate(attrs)
+        remember = attrs.pop("remember_me", False)
+        super().validate(attrs)
+
+        # Le jeton de rafraîchissement porte la durée choisie. Sans « se souvenir
+        # de moi », il vit une journée et le client le garde en mémoire de
+        # session : fermer le navigateur suffit à couper — c'est le cas du poste
+        # partagé du secrétariat.
+        refresh = self.get_token(self.user)
+        lifetime = (
+            settings.REMEMBERED_REFRESH_LIFETIME
+            if remember
+            else settings.SESSION_REFRESH_LIFETIME
+        )
+        refresh.set_exp(lifetime=lifetime)
+        data = {}
+        data["sid"] = refresh["sid"]
+        data["refresh"] = str(refresh)
+        data["access"] = str(refresh.access_token)
+        data["remembered"] = remember
+        data["expires_at"] = (timezone.now() + lifetime).isoformat()
+
         user = self.user
         data["user"] = {
             "id": user.id,
             "email": user.email,
             "full_name": user.get_full_name(),
             "role": user.role,
+            "photo": user.photo.url if user.photo else None,
+            "initials": user.initials,
         }
         data["school"] = (
             {

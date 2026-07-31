@@ -1,7 +1,8 @@
-import type { ReactElement } from "react";
-import { NavLink, Outlet } from "react-router-dom";
+import { useEffect, useRef, useState, type ReactElement } from "react";
+import { NavLink, Outlet, useNavigate } from "react-router-dom";
 
 import { useAuth } from "../auth";
+import { Avatar } from "../pages/Account";
 import ThemeToggle from "./ThemeToggle";
 
 const ROLE_LABELS: Record<string, string> = {
@@ -113,8 +114,106 @@ const SECTIONS: { group: string; links: NavLinkSpec[] }[] = [
   },
 ];
 
+/**
+ * Vignette de l'utilisateur, en pied de barre.
+ *
+ * Elle remplace le bloc « nom / rôle / bouton » : trois éléments empilés qui
+ * occupaient la place d'un menu et n'en offraient qu'une action. Le menu
+ * s'ouvre vers le haut — la vignette est déjà en bas de l'écran.
+ */
+function UserChip() {
+  const { profile, logout } = useAuth();
+  const [open, setOpen] = useState(false);
+  const holder = useRef<HTMLDivElement>(null);
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    if (!open) return;
+    function onPointerDown(event: MouseEvent) {
+      if (!holder.current?.contains(event.target as Node)) setOpen(false);
+    }
+    // Échap ferme aussi : un menu qui ne se referme qu'au clic piège qui navigue
+    // au clavier.
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") setOpen(false);
+    }
+    document.addEventListener("mousedown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [open]);
+
+  if (!profile) return null;
+
+  return (
+    <div className="user-chip-holder" ref={holder}>
+      {open && (
+        <div className="user-menu" role="menu">
+          <div className="user-menu-head">
+            <Avatar profile={profile} size={40} />
+            <div>
+              <strong>{profile.full_name || profile.email}</strong>
+              <span>{profile.email}</span>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => {
+              setOpen(false);
+              navigate("/compte");
+            }}
+          >
+            Mon compte
+          </button>
+
+          <div className="user-menu-row">
+            <span>Apparence</span>
+            <ThemeToggle />
+          </div>
+
+          <button type="button" role="menuitem" className="danger" onClick={logout}>
+            Se déconnecter
+          </button>
+        </div>
+      )}
+
+      <button
+        type="button"
+        className={`user-chip ${open ? "open" : ""}`}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onClick={() => setOpen((current) => !current)}
+      >
+        <Avatar profile={profile} size={34} />
+        <span className="user-chip-text">
+          <strong>{profile.full_name || profile.email}</strong>
+          <span>{ROLE_LABELS[profile.role] ?? profile.role}</span>
+        </span>
+        <svg
+          className="user-chip-caret"
+          viewBox="0 0 16 16"
+          width="14"
+          height="14"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.7"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden="true"
+        >
+          <path d="m4.5 10 3.5-3.5L11.5 10" />
+        </svg>
+      </button>
+    </div>
+  );
+}
+
 export default function Layout() {
-  const { profile, logout, can } = useAuth();
+  const { profile, can } = useAuth();
 
   return (
     <div className="app">
@@ -155,16 +254,7 @@ export default function Layout() {
         </nav>
 
         <div className="sidebar-footer">
-          <div className="who">
-            <strong>{profile?.full_name || profile?.email}</strong>
-            {ROLE_LABELS[profile?.role ?? ""] ?? profile?.role}
-          </div>
-          <div style={{ marginBottom: 8 }}>
-            <ThemeToggle />
-          </div>
-          <button type="button" className="ghost" onClick={logout}>
-            Se déconnecter
-          </button>
+          <UserChip />
         </div>
       </aside>
 

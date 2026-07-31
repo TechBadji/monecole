@@ -211,8 +211,18 @@ class RouteDeclarationTests(TestCase):
             permissions = getattr(view_class, "permission_classes", [])
             if AllowAny in permissions:
                 continue
-            # `LoginView` et `MeView` s'appuient sur l'authentification seule.
-            if view_class.__name__ in {"LoginView", "MeView"}:
+            # Ces vues s'appuient sur l'authentification seule : elles n'agissent
+            # que sur le compte de l'appelant, et aucun rôle n'y donne plus de
+            # droits qu'un autre. Un `resource` y serait faux.
+            if view_class.__name__ in {
+                "LoginView",
+                "MeView",
+                "ProfileView",
+                "ProfilePhotoView",
+                "PasswordChangeView",
+                "SessionListView",
+                "SessionRevokeView",
+            }:
                 continue
             undeclared.append(f"{view_class.__module__}.{view_class.__name__}")
 
@@ -242,5 +252,13 @@ class RouteDeclarationTests(TestCase):
                 "ParentOtpVerifyView",     # code à usage unique, verrouillé
                 "WaveWebhookView",         # signature HMAC obligatoire
                 "SimulatedWaveCheckoutView",  # refusé hors DEBUG
+                # Réinitialisation de mot de passe. Publiques par nécessité :
+                # quelqu'un qui a perdu son mot de passe ne peut pas s'authentifier.
+                # Bornées à 5 demandes par heure, et leurs réponses sont
+                # identiques que l'adresse existe ou non, pour ne pas servir à
+                # énumérer le personnel d'un établissement.
+                "PasswordResetRequestView",
+                "PasswordResetCheckView",
+                "PasswordResetConfirmView",
             },
         )

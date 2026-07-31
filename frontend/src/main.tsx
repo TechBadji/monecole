@@ -6,10 +6,13 @@ import { AuthProvider, useAuth } from "./auth";
 import Layout from "./components/Layout";
 import { SyncBanner } from "./components/OfflineBanners";
 import { startSyncWatcher } from "./offline/sync";
+import ForgotPassword from "./pages/ForgotPassword";
 import Login from "./pages/Login";
+import ResetPassword from "./pages/ResetPassword";
 
 // Écrans chargés à la demande. Un comptable qui saisit des encaissements n'a pas à
 // télécharger la bibliothèque de graphiques du tableau de bord, ni le module de paie.
+const Account = lazy(() => import("./pages/Account"));
 const Arrears = lazy(() => import("./pages/Arrears"));
 const Attendance = lazy(() => import("./pages/Attendance"));
 const Compositions = lazy(() => import("./pages/Compositions"));
@@ -71,12 +74,33 @@ function Root() {
       </Suspense>
     );
   }
-  if (!profile) return <Login />;
+  // Hors session, trois écrans sont joignables. Sans ces routes, le lien reçu
+  // par courrier tomberait sur le formulaire de connexion, et « mot de passe
+  // oublié » ne mènerait nulle part.
+  if (!profile) {
+    return (
+      <Routes>
+        <Route path="/mot-de-passe-oublie" element={<ForgotPassword />} />
+        <Route path="/reinitialiser" element={<ResetPassword />} />
+        <Route path="*" element={<Login />} />
+      </Routes>
+    );
+  }
 
   return (
     <Routes>
       <Route element={<Layout />}>
         <Route index element={<Home />} />
+        {/* Aucun `Guarded` : chacun accède à son propre compte, quel que soit
+            son rôle. */}
+        <Route
+          path="compte"
+          element={
+            <Suspense fallback={<div className="spinner">Chargement…</div>}>
+              <Account />
+            </Suspense>
+          }
+        />
         <Route
           path="eleves"
           element={

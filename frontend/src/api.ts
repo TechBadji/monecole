@@ -11,20 +11,56 @@ const BASE_URL = import.meta.env.VITE_API_URL ?? "http://localhost:8000/api";
 const ACCESS_KEY = "monecole.access";
 const REFRESH_KEY = "monecole.refresh";
 
+/**
+ * Deux magasins, et c'est ce qui fait « se souvenir de moi ».
+ *
+ * `sessionStorage` est vidé par le navigateur à la fermeture de l'onglet ;
+ * `localStorage` survit. Sans la case cochée, refermer le navigateur suffit donc
+ * à couper la session — ce qui compte sur le poste partagé d'un secrétariat, où
+ * la personne suivante ouvre le même navigateur.
+ *
+ * La lecture interroge les deux : l'utilisateur peut avoir coché la case hier et
+ * pas aujourd'hui, et l'onglet en cours ne doit pas perdre sa session pour
+ * autant. L'écriture, elle, ne vise qu'un seul magasin, et efface l'autre pour
+ * qu'un ancien jeton oublié dans `localStorage` ne ressuscite pas une session
+ * qu'on venait de vouloir éphémère.
+ */
+function readToken(key: string) {
+  return sessionStorage.getItem(key) ?? localStorage.getItem(key);
+}
+
 export const tokens = {
   get access() {
-    return localStorage.getItem(ACCESS_KEY);
+    return readToken(ACCESS_KEY);
   },
   get refresh() {
-    return localStorage.getItem(REFRESH_KEY);
+    return readToken(REFRESH_KEY);
   },
-  set({ access, refresh }: { access: string; refresh?: string }) {
-    localStorage.setItem(ACCESS_KEY, access);
-    if (refresh) localStorage.setItem(REFRESH_KEY, refresh);
+  /** `remember` absent : on conserve le magasin déjà utilisé par la session. */
+  set({
+    access,
+    refresh,
+    remember,
+  }: {
+    access: string;
+    refresh?: string;
+    remember?: boolean;
+  }) {
+    const persistent =
+      remember ?? localStorage.getItem(REFRESH_KEY) !== null;
+    const store = persistent ? localStorage : sessionStorage;
+    const other = persistent ? sessionStorage : localStorage;
+
+    store.setItem(ACCESS_KEY, access);
+    if (refresh) store.setItem(REFRESH_KEY, refresh);
+    other.removeItem(ACCESS_KEY);
+    other.removeItem(REFRESH_KEY);
   },
   clear() {
-    localStorage.removeItem(ACCESS_KEY);
-    localStorage.removeItem(REFRESH_KEY);
+    for (const store of [localStorage, sessionStorage]) {
+      store.removeItem(ACCESS_KEY);
+      store.removeItem(REFRESH_KEY);
+    }
   },
 };
 
@@ -90,7 +126,7 @@ async function refreshAccessToken(): Promise<boolean> {
 
 type RequestOptions = {
   method?: string;
-  body?: unknown;
+  body?: unknown | FormData;
   raw?: boolean;
   headers?: Record<string, string>;
 };
@@ -101,13 +137,17 @@ export async function request<T = unknown>(
 ): Promise<T> {
   const send = () => {
     const headers: Record<string, string> = { ...extra };
-    if (body !== undefined) headers["Content-Type"] = "application/json";
+    // Sur un envoi multipart, laisser le navigateur poser le `Content-Type` :
+    // lui seul connaît la chaîne de délimitation, et l'écraser rend le corps
+    // illisible au serveur.
+    const multipart = body instanceof FormData;
+    if (body !== undefined && !multipart) headers["Content-Type"] = "application/json";
     const access = tokens.access;
     if (access) headers.Authorization = `Bearer ${access}`;
     return fetch(`${BASE_URL}${path}`, {
       method,
       headers,
-      body: body === undefined ? undefined : JSON.stringify(body),
+      body: multipart ? body : body === undefined ? undefined : JSON.stringify(body),
     });
   };
 
@@ -135,18 +175,23 @@ export const api = {
   patch: <T>(path: string, body: unknown) => request<T>(path, { method: "PATCH", body }),
   delete: (path: string) => request<void>(path, { method: "DELETE" }),
 
-  async login(email: string, password: string) {
+  async login(email: string, password: string, remember = false) {
     const response = await fetch(`${BASE_URL}/auth/login/`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email, password }),
+      body: JSON.stringify({ email, password, remember_me: remember }),
     });
     if (!response.ok) {
       throw new ApiError(response.status, await response.json().catch(() => null));
     }
     const data = await response.json();
-    tokens.set({ access: data.access, refresh: data.refresh });
+    tokens.set({ access: data.access, refresh: data.refresh, remember });
     return data;
+  },
+
+  /** Envoi multipart : pas d'en-tête `Content-Type`, le navigateur pose la limite. */
+  async upload<T>(path: string, body: FormData, method = "POST") {
+    return request<T>(path, { method, body });
   },
 
   /** Télécharge un export en conservant l'en-tête d'authentification. */

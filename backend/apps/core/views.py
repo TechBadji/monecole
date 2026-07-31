@@ -1,4 +1,5 @@
 from django.contrib.auth import get_user_model
+from django.utils.dateparse import parse_datetime
 from rest_framework import mixins, viewsets
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -6,7 +7,15 @@ from rest_framework.views import APIView
 from rest_framework_simplejwt.views import TokenObtainPairView
 
 from .audit import AuditedModelViewSetMixin, record
-from .models import AuditLog, Notification, Role, School, SchoolYear, Subscription
+from .models import (
+    AuditLog,
+    LoginSession,
+    Notification,
+    Role,
+    School,
+    SchoolYear,
+    Subscription,
+)
 from .serializers import (
     AuditLogSerializer,
     LoginSerializer,
@@ -32,7 +41,24 @@ class LoginView(TokenObtainPairView):
             user = User.objects.filter(email=request.data.get("email")).first()
             if user:
                 record(request, AuditLog.Action.LOGIN, user)
+                self.open_session(request, response, user)
         return response
+
+    def open_session(self, request, response, user):
+        """Enregistre la session pour la rendre visible et révocable."""
+        from .account import client_ip, device_label
+
+        LoginSession.objects.update_or_create(
+            sid=response.data["sid"],
+            defaults={
+                "user": user,
+                "device_label": device_label(request),
+                "ip_address": client_ip(request),
+                "remembered": response.data.get("remembered", False),
+                "expires_at": parse_datetime(response.data["expires_at"]),
+                "revoked_at": None,
+            },
+        )
 
 
 class MeView(APIView):
@@ -41,32 +67,9 @@ class MeView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        from .permissions import MATRIX
+        from .account import profile_payload
 
-        user = request.user
-        permissions = {
-            resource: sorted(roles.get(user.role, []))
-            for resource, roles in MATRIX.items()
-            if roles.get(user.role)
-        }
-        return Response(
-            {
-                "id": user.id,
-                "email": user.email,
-                "full_name": user.get_full_name(),
-                "role": user.role,
-                "school": (
-                    {
-                        "id": user.school.id,
-                        "name": user.school.name,
-                        "currency": user.school.currency,
-                    }
-                    if user.school
-                    else None
-                ),
-                "permissions": permissions,
-            }
-        )
+        return Response(profile_payload(request.user))
 
 
 class SchoolViewSet(viewsets.ModelViewSet):

@@ -6,8 +6,11 @@ import type { Profile } from "./types";
 type AuthState = {
   profile: Profile | null;
   loading: boolean;
-  login: (email: string, password: string) => Promise<void>;
+  login: (email: string, password: string, remember?: boolean) => Promise<void>;
   logout: () => void;
+  /** Les écrans du compte renvoient le profil complet : on le repose ici plutôt
+      que de recharger `/auth/me/` — la vignette de la barre suit aussitôt. */
+  setProfile: (profile: Profile) => void;
   can: (resource: string, action: string) => boolean;
 };
 
@@ -31,8 +34,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .finally(() => setLoading(false));
   }, []);
 
-  async function login(email: string, password: string) {
-    await api.login(email, password);
+  async function login(email: string, password: string, remember = false) {
+    await api.login(email, password, remember);
     setProfile(await api.get<Profile>("/auth/me/"));
   }
 
@@ -50,7 +53,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   return (
-    <AuthContext.Provider value={{ profile, loading, login, logout, can }}>
+    <AuthContext.Provider value={{ profile, loading, login, logout, setProfile, can }}>
       {children}
     </AuthContext.Provider>
   );
