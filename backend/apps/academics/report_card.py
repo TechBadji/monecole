@@ -117,29 +117,33 @@ def _identity(student, classroom, composition, styles):
 
 
 def _grades_table(result, styles):
-    rows = [["Matière", "Coef.", "Note /20", "Points", "Appréciation"]]
+    """Table calquée sur les bulletins de l'école : Cours, Notes, Sur.
+
+    Pas de colonne « Points » : le barème étant le poids, les points **sont** la
+    note. La colonne aurait répété chaque valeur et laissé croire à un calcul
+    intermédiaire qui n'existe pas.
+    """
+    rows = [["Cours", "Note", "Sur", "Appréciation"]]
     for line in result["lines"]:
         note = "Abs." if line["is_absent"] else _grade(line["value"])
         rows.append([
             line["subject"],
-            str(line["coefficient"]),
             note,
-            _grade(line["points"]),
+            str(line["max_score"]),
             Paragraph(line["comment"] or "", styles["small"]),
         ])
 
     rows.append([
         "Total",
-        str(result["total_coefficients"]),
-        "",
         _grade(result["total_points"]),
+        str(result["total_max_score"]),
         "",
     ])
     total_row = len(rows) - 1
 
     table = Table(
         rows,
-        colWidths=[58 * mm, 14 * mm, 20 * mm, 20 * mm, 36 * mm],
+        colWidths=[62 * mm, 18 * mm, 18 * mm, 50 * mm],
         repeatRows=1,
     )
     table.setStyle(TableStyle([
@@ -147,7 +151,7 @@ def _grades_table(result, styles):
         ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
         ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
         ("FONTSIZE", (0, 0), (-1, -1), 8),
-        ("ALIGN", (1, 0), (3, -1), "CENTER"),
+        ("ALIGN", (1, 0), (2, -1), "CENTER"),
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
         ("GRID", (0, 0), (-1, -1), 0.25, LINE),
         ("ROWBACKGROUNDS", (0, 1), (-1, total_row - 1), [colors.white, colors.HexColor("#F7F8FA")]),

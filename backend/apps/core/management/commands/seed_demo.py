@@ -25,7 +25,6 @@ from apps.core.tenancy import tenant_context, unscoped
 from apps.finance.models import DEFAULT_EXPENSE_CATEGORIES, Expense, ExpenseCategory, OtherIncome
 from apps.staff.models import PayrollProfile, PayrollScale, Salary, SalaryRubric, Teacher
 from apps.academics.models import (
-    DEFAULT_SUBJECTS,
     ClassSubject,
     Composition,
     Grade,
@@ -442,7 +441,7 @@ class Command(BaseCommand):
                 )
 
     def _create_academics(self, school, year, classrooms, teachers):
-        """Matières, coefficients, une composition trimestrielle et ses notes."""
+        """Matières, barèmes, une composition trimestrielle et ses notes."""
         ReportCardSettings.objects.create(
             school=school,
             header_line_1="République du Sénégal",
@@ -456,24 +455,35 @@ class Command(BaseCommand):
         )
         AttendanceSettings.objects.create(school=school)
 
-        subjects = [
-            Subject.objects.create(
-                school=school, code=code, name=name,
-                default_coefficient=coefficient, order=order,
+        # Catalogue relevé sur des bulletins réels : chaque niveau a ses
+        # matières et ses barèmes propres. Un jeu de démonstration qui donnerait
+        # les mêmes huit matières au CI et au CM2 ne ressemblerait à rien de ce
+        # qu'une école reconnaît.
+        from apps.academics.catalogue import SUBJECT_CATALOGUE, catalogue_for, subject_code
+
+        defaults = {}
+        for entries in SUBJECT_CATALOGUE.values():
+            for name, bareme in entries:
+                defaults.setdefault(name, bareme)
+
+        subjects = {}
+        for order, (name, bareme) in enumerate(sorted(defaults.items())):
+            subjects[name] = Subject.objects.create(
+                school=school, code=subject_code(name), name=name,
+                default_max_score=bareme, order=order,
             )
-            for order, (code, name, coefficient) in enumerate(DEFAULT_SUBJECTS)
-        ]
 
         # Seul l'élémentaire est noté : le préscolaire ne compose pas.
         primary = [c for c in classrooms if c.level == Level.PRIMARY]
         for classroom in primary:
-            for order, subject in enumerate(subjects):
+            entries = catalogue_for(classroom.name)
+            for order, (name, max_score) in enumerate(entries):
                 ClassSubject.objects.create(
                     school=school,
                     classroom=classroom,
-                    subject=subject,
+                    subject=subjects[name],
                     year=year,
-                    coefficient=subject.default_coefficient,
+                    max_score=max_score,
                     teacher=random.choice(teachers[:7]),
                     order=order,
                 )
@@ -503,9 +513,11 @@ class Command(BaseCommand):
                     school=school,
                     sheet=sheet,
                     student=student,
-                    # Distribution centrée sur 12, bornée au barème : des notes
-                    # uniformes rendraient le rang et les mentions insignifiants.
-                    value=Decimal(str(min(20, max(0, round(random.gauss(12, 3.2) * 2) / 2)))),
+                    # La note se tire sur le barème de la matière, non sur 20 :
+                    # une note de 14 sur une matière notée sur 4 n'existe pas.
+                    # La dispersion est voulue — des notes uniformes rendraient
+                    # le rang et les mentions insignifiants.
+                    value=_demo_grade(sheet.effective_max_score),
                 )
                 for student in students
             ])
@@ -576,3 +588,17 @@ class Command(BaseCommand):
         self.stdout.write("    secretaire@darou-louqmane.sn .. Secrétaire")
         self.stdout.write("    super@monecole.sn ............. Super administrateur")
         self.stdout.write("")
+
+
+def _demo_grade(max_score):
+    """Note plausible sur un barème donné.
+
+    Centrée haut : les bulletins de démonstration doivent ressembler à ceux
+    d'une école qui tourne, où la plupart des notes frôlent le barème.
+    """
+    import random
+    from decimal import Decimal
+
+    ratio = min(1.0, max(0.0, random.gauss(0.88, 0.14)))
+    # Au demi-point, comme l'école les saisit.
+    return Decimal(str(round(ratio * float(max_score) * 2) / 2))

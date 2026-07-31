@@ -15,11 +15,11 @@ type Result = {
   rank: number | null;
   ranked_out_of: number;
   total_points: string | null;
-  total_coefficients: number;
+  total_max_score: number;
   graded: boolean;
   lines: {
     subject: string;
-    coefficient: number;
+    max_score: number;
     value: string | null;
     is_absent: boolean;
     validated: boolean;
@@ -37,7 +37,7 @@ type ClassResults = {
     pass_rate: number | null;
     subjects: number;
   };
-  subjects: { name: string; coefficient: number }[];
+  subjects: { name: string; max_score: number }[];
   results: Result[];
 };
 
@@ -157,7 +157,7 @@ export default function ReportCards() {
           </p>
           <p className="muted" style={{ marginTop: "var(--space-2)" }}>
             C'est normal pour le préscolaire, qui ne compose pas. Pour une classe
-            élémentaire, rendez-vous dans « Matières et coefficients » pour lui
+            élémentaire, rendez-vous dans « Matières et barèmes » pour lui
             affecter des matières.
           </p>
         </div>
@@ -208,7 +208,7 @@ export default function ReportCards() {
                       <td className="muted">{result.matricule}</td>
                       <td>{result.name}</td>
                       <td className="num">{result.total_points ?? "—"}</td>
-                      <td className="num">{result.total_coefficients || "—"}</td>
+                      <td className="num">{result.total_max_score || "—"}</td>
                       <td className="num">
                         <strong>{result.average ?? "—"}</strong>
                       </td>
@@ -251,7 +251,7 @@ export default function ReportCards() {
                               {result.lines.map((line) => (
                                 <tr key={line.subject}>
                                   <td>{line.subject}</td>
-                                  <td className="num">{line.coefficient}</td>
+                                  <td className="num">{line.max_score}</td>
                                   <td className="num">
                                     {line.is_absent ? (
                                       <span className="muted">Absent</span>
@@ -261,7 +261,7 @@ export default function ReportCards() {
                                   </td>
                                   <td className="num">
                                     {line.value && !line.is_absent
-                                      ? (Number(line.value) * line.coefficient).toFixed(2)
+                                      ? (Number(line.value) * line.max_score).toFixed(2)
                                       : "—"}
                                   </td>
                                   <td>

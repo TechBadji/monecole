@@ -9,7 +9,7 @@ type Subject = {
   id: number;
   code: string;
   name: string;
-  default_coefficient: number;
+  default_max_score: number;
   order: number;
   is_active: boolean;
 };
@@ -19,7 +19,7 @@ type ClassSubject = {
   classroom: number;
   subject: number;
   subject_name: string;
-  coefficient: number;
+  max_score: number;
   teacher: number | null;
   teacher_name: string | null;
   order: number;
@@ -27,12 +27,12 @@ type ClassSubject = {
 
 type Teacher = { id: number; full_name: string; matricule: string };
 
-/** Ligne de configuration d'une classe : matière cochée, coefficient, enseignant. */
+/** Ligne de configuration d'une classe : matière cochée, barème, enseignant. */
 type Row = {
   subject: number;
   name: string;
   enabled: boolean;
-  coefficient: number;
+  max_score: number;
   teacher: string;
 };
 
@@ -52,7 +52,7 @@ export default function Subjects() {
   const [status, setStatus] = useState<{ kind: string; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const [draft, setDraft] = useState({ code: "", name: "", default_coefficient: "1" });
+  const [draft, setDraft] = useState({ code: "", name: "", default_max_score: "1" });
 
   useEffect(() => {
     if (classroom === null && classes?.results.length) {
@@ -79,7 +79,7 @@ export default function Subjects() {
           subject: subject.id,
           name: subject.name,
           enabled: Boolean(link),
-          coefficient: link?.coefficient ?? subject.default_coefficient,
+          max_score: link?.max_score ?? subject.default_max_score,
           teacher: link?.teacher ? String(link.teacher) : "",
         };
       }),
@@ -101,10 +101,10 @@ export default function Subjects() {
       await api.post("/subjects/", {
         code: draft.code.toUpperCase(),
         name: draft.name,
-        default_coefficient: Number(draft.default_coefficient) || 1,
+        default_max_score: Number(draft.default_max_score) || 1,
         order: (subjects?.count ?? 0) + 1,
       });
-      setDraft({ code: "", name: "", default_coefficient: "1" });
+      setDraft({ code: "", name: "", default_max_score: "1" });
       reloadSubjects();
       setStatus({ kind: "success", text: "Matière ajoutée au catalogue." });
     } catch (caught) {
@@ -150,7 +150,7 @@ export default function Subjects() {
           .filter((row) => row.enabled)
           .map((row) => ({
             subject: row.subject,
-            coefficient: row.coefficient,
+            max_score: row.max_score,
             teacher: row.teacher ? Number(row.teacher) : null,
           })),
       });
@@ -173,16 +173,44 @@ export default function Subjects() {
   }
 
   const enabled = rows.filter((row) => row.enabled);
-  const totalCoefficients = enabled.reduce((sum, row) => sum + row.coefficient, 0);
+  const totalScale = enabled.reduce((sum, row) => sum + row.max_score, 0);
+
+  /**
+   * Applique le catalogue relevé pour le niveau de la classe.
+   *
+   * Le serveur ne retouche pas les matières déjà rattachées : une école qui a
+   * ajusté un barème ne doit pas le voir écrasé par un rappel du catalogue.
+   */
+  async function applyCatalogue() {
+    if (!classroom || !currentYear) return;
+    setBusy(true);
+    setStatus(null);
+    try {
+      const response = await api.post<{ created: number; detail: string }>(
+        "/class-subjects/apply-catalogue/",
+        { classroom, year: currentYear.id },
+      );
+      reloadSubjects();
+      reloadAssigned();
+      setStatus({ kind: response.created ? "success" : "warning", text: response.detail });
+    } catch (caught) {
+      setStatus({
+        kind: "error",
+        text: caught instanceof Error ? caught.message : "Application impossible.",
+      });
+    } finally {
+      setBusy(false);
+    }
+  }
   const withoutTeacher = enabled.filter((row) => !row.teacher).length;
 
   return (
     <>
       <div className="page-head">
         <div>
-          <h1>Matières et coefficients</h1>
+          <h1>Matières et barèmes</h1>
           <p>
-            Le catalogue est commun à l'établissement ; les coefficients et
+            Le barème fait le poids : une matière sur 20 compte cinq fois une matière sur 4, et la moyenne vaut la somme des notes divisée par la somme des barèmes. Le catalogue est commun à l'établissement ; les barèmes et
             l'enseignant se règlent classe par classe — le français ne pèse pas le
             même poids en CI et en CM2.
           </p>
@@ -207,7 +235,7 @@ export default function Subjects() {
               <input
                 id="code"
                 value={draft.code}
-                placeholder="FR"
+                placeholder="CONJUGAISON"
                 maxLength={16}
                 onChange={(event) => setDraft({ ...draft, code: event.target.value })}
               />
@@ -217,20 +245,20 @@ export default function Subjects() {
               <input
                 id="name"
                 value={draft.name}
-                placeholder="Français"
+                placeholder="Conjugaison"
                 onChange={(event) => setDraft({ ...draft, name: event.target.value })}
               />
             </div>
             <div className="field" style={{ minWidth: 130 }}>
-              <label htmlFor="coef">Coefficient par défaut</label>
+              <label htmlFor="coef">Barème par défaut</label>
               <input
                 id="coef"
                 type="number"
                 min={1}
                 max={20}
-                value={draft.default_coefficient}
+                value={draft.default_max_score}
                 onChange={(event) =>
-                  setDraft({ ...draft, default_coefficient: event.target.value })
+                  setDraft({ ...draft, default_max_score: event.target.value })
                 }
               />
             </div>
@@ -264,9 +292,23 @@ export default function Subjects() {
             </select>
           </div>
           {isAdmin && (
-            <button type="button" onClick={saveAssignment} disabled={busy || !currentYear}>
-              {busy ? "Enregistrement…" : "Enregistrer la configuration"}
-            </button>
+            <>
+              <button type="button" onClick={saveAssignment} disabled={busy || !currentYear}>
+                {busy ? "Enregistrement…" : "Enregistrer la configuration"}
+              </button>
+              {/* Trente matières à cocher et à barémer une par une, pour six
+                  classes, c'est une demi-journée et autant d'occasions de se
+                  tromper d'un chiffre — une erreur qui ne se voit qu'au bulletin. */}
+              <button
+                type="button"
+                className="secondary"
+                onClick={applyCatalogue}
+                disabled={busy || !currentYear}
+                title="Ajoute les matières relevées pour ce niveau, avec leurs barèmes de référence"
+              >
+                Appliquer le catalogue du niveau
+              </button>
+            </>
           )}
         </div>
 
@@ -283,7 +325,7 @@ export default function Subjects() {
                   <tr>
                     <th style={{ width: 60 }}>Active</th>
                     <th>Matière</th>
-                    <th className="num" style={{ width: 120 }}>Coefficient</th>
+                    <th className="num" style={{ width: 120 }}>Barème</th>
                     <th style={{ width: 240 }}>Enseignant</th>
                   </tr>
                 </thead>
@@ -309,11 +351,11 @@ export default function Subjects() {
                           type="number"
                           min={1}
                           max={20}
-                          value={row.coefficient}
+                          value={row.max_score}
                           disabled={!isAdmin || !row.enabled}
                           onChange={(event) =>
                             update(row.subject, {
-                              coefficient: Number(event.target.value) || 1,
+                              max_score: Number(event.target.value) || 1,
                             })
                           }
                         />
@@ -339,7 +381,7 @@ export default function Subjects() {
                   <tr className="total">
                     <td />
                     <td>{enabled.length} matière(s) active(s)</td>
-                    <td className="num">{totalCoefficients}</td>
+                    <td className="num">{totalScale}</td>
                     <td />
                   </tr>
                 </tbody>

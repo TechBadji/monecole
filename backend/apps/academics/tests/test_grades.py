@@ -45,18 +45,18 @@ class AcademicsTestCase(TestCase):
                 school=cls.school, first_name="Ousmane", last_name="Bodian",
                 email="prof@test.sn",
             )
-            # Français coefficient 4, Mathématiques 4, Anglais 1 : total 9.
+            # Barèmes : Français sur 40, Mathématiques sur 40, Anglais sur 10.
             cls.subjects = {}
-            for order, (code, name, coefficient) in enumerate(
-                [("FR", "Français", 4), ("MATH", "Mathématiques", 4), ("EN", "Anglais", 1)]
+            for order, (code, name, max_score) in enumerate(
+                [("FR", "Français", 40), ("MATH", "Mathématiques", 40), ("EN", "Anglais", 10)]
             ):
                 subject = Subject.objects.create(
                     school=cls.school, code=code, name=name,
-                    default_coefficient=coefficient, order=order,
+                    default_max_score=max_score, order=order,
                 )
                 cls.subjects[code] = ClassSubject.objects.create(
                     school=cls.school, classroom=cls.cm2, subject=subject,
-                    year=cls.year, coefficient=coefficient, teacher=cls.teacher,
+                    year=cls.year, max_score=max_score, teacher=cls.teacher,
                     order=order,
                 )
 
@@ -80,40 +80,41 @@ class AcademicsTestCase(TestCase):
 
 
 class WeightedAverageTests(AcademicsTestCase):
-    def test_weighted_average_is_computed_by_hand(self):
-        """Français 14×4 = 56, Maths 12×4 = 48, Anglais 16×1 = 16.
+    def test_average_is_the_sum_of_points_over_the_sum_of_scales(self):
+        """Français 34/40, Maths 30/40, Anglais 8/10.
 
-        Total 120 points sur 9 coefficients → 13,33.
+        72 points sur un barème de 90 → 8,00 sur 10. Aucun multiplicateur
+        n'intervient : le barème fait seul le poids.
         """
         student = make_student(self.school, self.cm2, "Awa", "Diop")
-        self.grade(student, "FR", 14)
-        self.grade(student, "MATH", 12)
-        self.grade(student, "EN", 16)
+        self.grade(student, "FR", 34)
+        self.grade(student, "MATH", 30)
+        self.grade(student, "EN", 8)
 
         with tenant_context(self.school):
             results, _, _ = student_results(self.composition, self.cm2)
 
         result = results[student.id]
-        self.assertEqual(result["total_points"], Decimal("120.00"))
-        self.assertEqual(result["total_coefficients"], 9)
-        self.assertEqual(result["average"], Decimal("13.33"))
+        self.assertEqual(result["total_points"], Decimal("72.00"))
+        self.assertEqual(result["total_max_score"], 90)
+        self.assertEqual(result["average"], Decimal("8.00"))
 
     def test_absence_is_not_a_zero(self):
-        """Une absence retire son coefficient au lieu de tirer la moyenne à zéro.
+        """Une absence retire son barème du dénominateur.
 
-        Français 14×4 = 56 sur 4 coefficients → 14,00. Compter l'absence en maths
-        comme un zéro donnerait 56/8 = 7,00.
+        Français 34 sur un barème de 40 → 8,50 sur 10. Compter l'absence en
+        maths comme un zéro donnerait 34/80 × 10 = 4,25.
         """
         student = make_student(self.school, self.cm2, "Awa", "Diop")
-        self.grade(student, "FR", 14)
+        self.grade(student, "FR", 34)
         self.grade(student, "MATH", absent=True)
 
         with tenant_context(self.school):
             results, _, _ = student_results(self.composition, self.cm2)
 
         result = results[student.id]
-        self.assertEqual(result["total_coefficients"], 4)
-        self.assertEqual(result["average"], Decimal("14.00"))
+        self.assertEqual(result["total_max_score"], 40)
+        self.assertEqual(result["average"], Decimal("8.50"))
 
     def test_student_without_any_grade_has_no_average(self):
         student = make_student(self.school, self.cm2, "Sans", "Note")
@@ -124,21 +125,43 @@ class WeightedAverageTests(AcademicsTestCase):
         self.assertIsNone(result["average"])
         self.assertFalse(result["graded"])
 
-    def test_coefficient_belongs_to_the_class_not_the_subject(self):
-        """Une école doit pouvoir pondérer le français différemment selon le niveau."""
+    def test_scale_belongs_to_the_class_not_the_subject(self):
+        """Une école doit pouvoir pondérer une matière selon le niveau."""
         with tenant_context(self.school):
-            self.subjects["FR"].coefficient = 2
+            self.subjects["FR"].max_score = 20
             self.subjects["FR"].save()
 
         student = make_student(self.school, self.cm2, "Awa", "Diop")
-        self.grade(student, "FR", 14)   # 14 × 2 = 28
-        self.grade(student, "MATH", 12)  # 12 × 4 = 48
+        self.grade(student, "FR", 18)
+        self.grade(student, "MATH", 30)
 
         with tenant_context(self.school):
             results, _, _ = student_results(self.composition, self.cm2)
 
-        # 76 points sur 6 coefficients → 12,67.
-        self.assertEqual(results[student.id]["average"], Decimal("12.67"))
+        # 48 points sur un barème de 60 → 8,00.
+        self.assertEqual(results[student.id]["average"], Decimal("8.00"))
+
+    def test_the_sheet_scale_overrides_the_class_one(self):
+        """Le barème change d'une épreuve à l'autre — relevé sur les bulletins.
+
+        Au CE2, la conjugaison a été notée sur 4, 8, 10 puis 12 dans la même
+        année. Sans cette bascule, la moyenne d'une épreuve serait fausse dès
+        qu'elle s'écarte du barème de référence.
+        """
+        student = make_student(self.school, self.cm2, "Awa", "Diop")
+        self.grade(student, "FR", 34)
+
+        with tenant_context(self.school):
+            sheet = GradeSheet.objects.get(class_subject=self.subjects["FR"])
+            sheet.max_score = 40
+            self.assertEqual(sheet.effective_max_score, 40)
+            sheet.max_score = 50   # l'épreuve était notée sur 50, pas sur 40
+            sheet.save()
+            results, _, _ = student_results(self.composition, self.cm2)
+
+        # 34 sur 50 → 6,80, et non 34/40 × 10 = 8,50.
+        self.assertEqual(results[student.id]["average"], Decimal("6.80"))
+        self.assertEqual(results[student.id]["total_max_score"], 50)
 
 
 class RankTests(AcademicsTestCase):
@@ -191,10 +214,11 @@ class RankTests(AcademicsTestCase):
 
 class MentionTests(TestCase):
     def test_thresholds(self):
+        # Échelle sur 10, comme les bulletins de l'école.
         for average, expected in [
-            (17, "Très bien"), (16, "Très bien"), (15, "Bien"), (14, "Bien"),
-            (13, "Assez bien"), (12, "Assez bien"), (11, "Passable"),
-            (10, "Passable"), (9.5, "Insuffisant"),
+            (9.5, "Très bien"), (8, "Très bien"), (7.5, "Bien"), (7, "Bien"),
+            (6.5, "Assez bien"), (6, "Assez bien"), (5.5, "Passable"),
+            (5, "Passable"), (4.9, "Insuffisant"),
         ]:
             self.assertEqual(mention_for(average), expected, f"moyenne {average}")
 
@@ -326,10 +350,11 @@ class ReportCardTests(AcademicsTestCase):
     def test_class_summary(self):
         with tenant_context(self.school):
             summary = class_summary(self.composition, self.cm2)
-        # (14×4 + 12×4) / 8 = 13,00
-        self.assertEqual(summary["class_average"], Decimal("13.00"))
+        # (14 + 12) points sur un barème de 80 → 3,25 sur 10.
+        self.assertEqual(summary["class_average"], Decimal("3.25"))
         self.assertEqual(summary["graded"], 1)
-        self.assertEqual(summary["pass_rate"], 100.0)
+        # 3,25 sur 10 : sous le seuil de passage, qui est 5.
+        self.assertEqual(summary["pass_rate"], 0.0)
 
     def test_individual_pdf(self):
         response = self.client.get(

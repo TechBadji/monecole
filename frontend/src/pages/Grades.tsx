@@ -12,7 +12,7 @@ type SheetSummary = {
   classroom: string;
   classroom_id: number;
   subject: string;
-  coefficient: number;
+  max_score: number;
   validated: boolean;
   students: number;
   entered: number;
@@ -35,7 +35,7 @@ type Sheet = {
   editable: boolean;
   classroom: string;
   subject: string;
-  coefficient: number;
+  max_score: number;
   validated: boolean;
   validated_at: string | null;
   validated_by: string;
@@ -224,7 +224,7 @@ export default function Grades() {
           <p>
             Notes sur 20. Une note peut être enregistrée seule ou toute la classe en
             une fois. Un élève absent se coche plutôt que de recevoir un zéro : son
-            coefficient sort alors de la moyenne.
+            barème sort alors du dénominateur.
           </p>
         </div>
       </div>
@@ -275,7 +275,7 @@ export default function Grades() {
                     >
                       <span className="sheet-name">{item.subject}</span>
                       <span className="sheet-meta">
-                        coef {item.coefficient} · {item.entered}/{item.students}
+                        sur {item.max_score} · {item.entered}/{item.students}
                         {item.validated && <span className="badge paid">Validée</span>}
                       </span>
                     </button>
@@ -301,7 +301,7 @@ export default function Grades() {
                     {sheet.classroom} — {sheet.subject}
                   </h2>
                   <p className="muted">
-                    {sheet.composition} · coefficient {sheet.coefficient}
+                    {sheet.composition} · noté sur {sheet.max_score}
                     {average && ` · moyenne saisie ${average}/20`}
                   </p>
                 </div>

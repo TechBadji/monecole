@@ -2,6 +2,7 @@ from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
 from .views import (
+    ClassSubjectApplyCatalogueView,
     ClassSubjectBulkView,
     ClassSubjectViewSet,
     CompositionViewSet,
@@ -18,8 +19,15 @@ router.register("compositions", CompositionViewSet, basename="composition")
 router.register("grade-sheets", GradeEntryViewSet, basename="gradesheet")
 router.register("report-cards", ReportCardViewSet, basename="reportcard")
 
+# Les chemins explicites précèdent le routeur : sinon « apply-catalogue » et
+# « bulk » sont happés par la route de détail du ViewSet, qui les prend pour des
+# identifiants et répond 405.
 urlpatterns = [
-    path("", include(router.urls)),
+    path(
+        "class-subjects/apply-catalogue/",
+        ClassSubjectApplyCatalogueView.as_view(),
+        name="class-subjects-apply-catalogue",
+    ),
     path(
         "class-subjects/bulk/",
         ClassSubjectBulkView.as_view(),
@@ -30,4 +38,5 @@ urlpatterns = [
         ReportCardSettingsView.as_view(),
         name="report-card-settings",
     ),
+    path("", include(router.urls)),
 ]

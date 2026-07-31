@@ -3,7 +3,7 @@
 Deux règles gouvernent tout le module :
 
 1. **Une absence n'est pas un zéro.** Une note absente sort du calcul : son
-   coefficient est retiré du total des coefficients, au lieu de tirer la moyenne
+   barème est retiré du dénominateur, au lieu de tirer la moyenne
    vers le bas. Compter une absence comme zéro pénaliserait un élève malade
    exactement comme un élève ayant rendu copie blanche.
 2. **Le rang se calcule sur les élèves effectivement notés.** Un élève sans
@@ -12,9 +12,12 @@ Deux règles gouvernent tout le module :
 
 from decimal import Decimal, ROUND_HALF_UP
 
-from .models import ClassSubject, Grade, GradeSheet, mention_for
+from .models import AVERAGE_SCALE, ClassSubject, Grade, GradeSheet, mention_for
 
 TWO_PLACES = Decimal("0.01")
+
+# Moitié de l'échelle, comme le 10 sur 20 de l'usage.
+PASSING_AVERAGE = AVERAGE_SCALE / 2
 
 
 def _round(value):
@@ -58,19 +61,21 @@ def student_results(composition, classroom):
     for student in students:
         lines = []
         points = Decimal("0")
-        coefficients = 0
+        scale = 0   # somme des barèmes des matières effectivement notées
 
         for class_subject in subjects:
             sheet = sheets.get(class_subject.id)
             grade = grades.get((sheet.id, student.id)) if sheet else None
             value = grade.value if grade and grade.counts else None
+            # Le barème de l'épreuve prime sur celui de la classe : la même
+            # matière est notée sur 4 à un contrôle et sur 12 au suivant.
+            max_score = sheet.effective_max_score if sheet else class_subject.max_score
 
             line = {
                 "class_subject": class_subject.id,
                 "subject": class_subject.subject.name,
-                "coefficient": class_subject.coefficient,
+                "max_score": max_score,
                 "value": value,
-                "points": _round(value * class_subject.coefficient) if value is not None else None,
                 "is_absent": bool(grade and grade.is_absent),
                 "comment": grade.comment if grade else "",
                 "validated": bool(sheet and sheet.is_validated),
@@ -79,20 +84,23 @@ def student_results(composition, classroom):
             lines.append(line)
 
             if value is not None:
-                points += value * class_subject.coefficient
-                coefficients += class_subject.coefficient
+                points += value
+                scale += max_score
 
-        average = _round(points / coefficients) if coefficients else None
+        # Le barème fait le poids : aucune multiplication n'intervient. Une
+        # matière sur 20 pèse cinq fois une matière sur 4 parce qu'elle apporte
+        # cinq fois plus de points au numérateur comme au dénominateur.
+        average = _round(points / scale * AVERAGE_SCALE) if scale else None
         results[student.id] = {
             "student": student.id,
             "matricule": student.matricule,
             "name": student.full_name,
             "lines": lines,
-            "total_points": _round(points) if coefficients else None,
-            "total_coefficients": coefficients,
+            "total_points": _round(points) if scale else None,
+            "total_max_score": scale,
             "average": average,
             "mention": mention_for(float(average)) if average is not None else "",
-            "graded": coefficients > 0,
+            "graded": scale > 0,
         }
 
     _assign_ranks(results)
@@ -142,7 +150,9 @@ def class_summary(composition, classroom):
             "subjects": len(subjects),
         }
 
-    passing = sum(1 for a in averages if a >= 10)
+    # La moyenne est sur 10 : le seuil de passage est 5, non 10. Laissé à 10, il
+    # aurait affiché 0 % de réussite dans toutes les classes de l'établissement.
+    passing = sum(1 for a in averages if a >= PASSING_AVERAGE)
     return {
         "graded": len(averages),
         "class_average": _round(sum(averages) / len(averages)),
@@ -179,7 +189,7 @@ def sheet_completeness(composition):
                 "sheet": sheet.id,
                 "classroom": sheet.class_subject.classroom.name,
                 "subject": sheet.class_subject.subject.name,
-                "coefficient": sheet.class_subject.coefficient,
+                "max_score": sheet.effective_max_score,
                 "validated": sheet.is_validated,
                 "entered": filled,
                 "expected": total,

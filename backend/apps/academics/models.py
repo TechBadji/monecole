@@ -1,5 +1,6 @@
 from decimal import Decimal
 
+from django.core.exceptions import ValidationError
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 
@@ -7,19 +8,14 @@ from apps.core.models import SchoolYear
 from apps.core.tenancy import TenantScopedModel
 
 # Barème sénégalais : notes sur 20, au demi-point.
-MAX_GRADE = Decimal("20")
+# Borne haute d'un barème. Aucune matière relevée ne dépasse 60 (Compétences
+# Maths et Production d'écrits en CM1/CM2) ; 100 laisse de la marge sans rendre
+# une faute de frappe indolore.
+MAX_SCORE = 100
 
-# Matières usuelles de l'élémentaire sénégalais, avec leurs coefficients d'usage.
-DEFAULT_SUBJECTS = [
-    ("FR", "Français", 4),
-    ("MATH", "Mathématiques", 4),
-    ("SCI", "Sciences et vie de la terre", 2),
-    ("HG", "Histoire-Géographie", 2),
-    ("AR", "Arabe", 2),
-    ("EN", "Anglais", 1),
-    ("EPS", "Éducation physique et sportive", 1),
-    ("CONDUITE", "Conduite", 1),
-]
+# Échelle de la moyenne. Les bulletins de l'école élémentaire sénégalaise
+# retenue sont sur 10 : moyenne = somme des notes / somme des barèmes × 10.
+AVERAGE_SCALE = Decimal("10")
 
 
 class Subject(TenantScopedModel):
@@ -27,7 +23,11 @@ class Subject(TenantScopedModel):
 
     code = models.CharField("code", max_length=16)
     name = models.CharField("intitulé", max_length=100)
-    default_coefficient = models.PositiveSmallIntegerField("coefficient par défaut", default=1)
+    default_max_score = models.PositiveSmallIntegerField(
+        "barème par défaut",
+        default=10,
+        validators=[MinValueValidator(1), MaxValueValidator(MAX_SCORE)],
+    )
     order = models.PositiveSmallIntegerField("rang", default=0)
     is_active = models.BooleanField("active", default=True)
 
@@ -44,11 +44,16 @@ class Subject(TenantScopedModel):
 
 
 class ClassSubject(TenantScopedModel):
-    """Matière rattachée à une classe, avec son coefficient et son enseignant.
+    """Matière rattachée à une classe, avec son barème et son enseignant.
 
-    Le coefficient est porté ici et non sur la matière : le français ne pèse pas
-    le même poids en garderie et en CM2, et une école doit pouvoir l'ajuster
-    classe par classe sans dupliquer ses matières.
+    **Le barème est le poids.** Il n'y a pas de coefficient multiplicateur : une
+    matière sur 20 pèse cinq fois une matière sur 4, et la moyenne vaut
+    `somme des notes / somme des barèmes × 10`. C'est la règle établie sur vingt
+    bulletins réels — voir `catalogue.py` et `docs/bareme-gsk.md`.
+
+    Le barème est porté ici et non sur la matière : la conjugaison ne pèse pas
+    le même poids au CI et au CM2, et une école doit pouvoir l'ajuster classe
+    par classe sans dupliquer ses matières.
     """
 
     classroom = models.ForeignKey(
@@ -56,7 +61,12 @@ class ClassSubject(TenantScopedModel):
     )
     subject = models.ForeignKey(Subject, on_delete=models.CASCADE, related_name="class_subjects")
     year = models.ForeignKey(SchoolYear, on_delete=models.CASCADE, related_name="class_subjects")
-    coefficient = models.PositiveSmallIntegerField("coefficient", default=1)
+    max_score = models.PositiveSmallIntegerField(
+        "barème",
+        default=10,
+        validators=[MinValueValidator(1), MaxValueValidator(MAX_SCORE)],
+        help_text="Note maximale de la matière. C'est elle qui fait son poids.",
+    )
     teacher = models.ForeignKey(
         "staff.Teacher",
         on_delete=models.SET_NULL,
@@ -79,7 +89,7 @@ class ClassSubject(TenantScopedModel):
         ]
 
     def __str__(self):
-        return f"{self.classroom} — {self.subject} (coef {self.coefficient})"
+        return f"{self.classroom} — {self.subject} (sur {self.max_score})"
 
 
 class Composition(TenantScopedModel):
@@ -142,6 +152,16 @@ class GradeSheet(TenantScopedModel):
     class_subject = models.ForeignKey(
         ClassSubject, on_delete=models.CASCADE, related_name="sheets"
     )
+    # Le barème change d'une épreuve à l'autre : au CE2, la conjugaison a été
+    # notée sur 4, 8, 10 puis 12 dans la même année. Vide signifie « celui de la
+    # classe » — le cas courant, qu'on ne veut pas faire ressaisir.
+    max_score = models.PositiveSmallIntegerField(
+        "barème de l'épreuve",
+        null=True,
+        blank=True,
+        validators=[MinValueValidator(1), MaxValueValidator(MAX_SCORE)],
+        help_text="Laisser vide pour reprendre le barème de la classe.",
+    )
     is_validated = models.BooleanField("validée", default=False)
     validated_at = models.DateTimeField(null=True, blank=True)
     validated_by = models.CharField(max_length=150, blank=True)
@@ -158,6 +178,11 @@ class GradeSheet(TenantScopedModel):
     def __str__(self):
         return f"{self.class_subject} — {self.composition.name}"
 
+    @property
+    def effective_max_score(self):
+        """Barème qui fait foi pour cette feuille."""
+        return self.max_score or self.class_subject.max_score
+
 
 class Grade(TenantScopedModel):
     """Note d'un élève dans une matière pour une composition."""
@@ -168,12 +193,15 @@ class Grade(TenantScopedModel):
     )
     value = models.DecimalField(
         "note",
-        max_digits=4,
+        max_digits=5,
         decimal_places=2,
         null=True,
         blank=True,
-        validators=[MinValueValidator(Decimal("0")), MaxValueValidator(MAX_GRADE)],
-        help_text="Sur 20. Vide signifie « absent », ce qui n'est pas un zéro.",
+        validators=[MinValueValidator(Decimal("0"))],
+        help_text=(
+            "Sur le barème de la feuille, et non sur 20. Vide signifie "
+            "« absent », ce qui n'est pas un zéro."
+        ),
     )
     is_absent = models.BooleanField("absent", default=False)
     comment = models.CharField("appréciation", max_length=255, blank=True)
@@ -195,6 +223,20 @@ class Grade(TenantScopedModel):
                 name="absent_grade_has_no_value",
             ),
         ]
+
+    def clean(self):
+        """La borne haute est le barème de la feuille, et lui seul.
+
+        Un `MaxValueValidator` fixe ne conviendrait pas : la même note vaut 16
+        sur 16 en activités numériques et serait aberrante sur un barème de 4.
+        """
+        super().clean()
+        if self.value is not None and self.sheet_id:
+            ceiling = self.sheet.effective_max_score
+            if self.value > ceiling:
+                raise ValidationError(
+                    {"value": f"La note dépasse le barème de la matière (sur {ceiling})."}
+                )
 
     def __str__(self):
         return f"{self.student} — {self.value if self.value is not None else 'abs'}"
@@ -249,15 +291,21 @@ class ReportCardSettings(TenantScopedModel):
 
 
 def mention_for(average):
-    """Mention correspondant à une moyenne sur 20, usage sénégalais."""
+    """Mention correspondant à une moyenne **sur 10**, usage sénégalais.
+
+    Les seuils sont ceux de l'échelle sur 20, divisés par deux : la moyenne du
+    produit est sur 10, comme celle des bulletins de l'école. Conserver les
+    seuils sur 20 aurait classé tout un établissement « Insuffisant » sans que
+    rien ne le signale.
+    """
     if average is None:
         return ""
-    if average >= 16:
+    if average >= 8:
         return "Très bien"
-    if average >= 14:
+    if average >= 7:
         return "Bien"
-    if average >= 12:
+    if average >= 6:
         return "Assez bien"
-    if average >= 10:
+    if average >= 5:
         return "Passable"
     return "Insuffisant"

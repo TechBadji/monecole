@@ -34,7 +34,7 @@ from .services import class_summary, sheet_completeness, student_results
 class SubjectSerializer(serializers.ModelSerializer):
     class Meta:
         model = Subject
-        fields = ["id", "code", "name", "default_coefficient", "order", "is_active"]
+        fields = ["id", "code", "name", "default_max_score", "order", "is_active"]
 
 
 class ClassSubjectSerializer(serializers.ModelSerializer):
@@ -46,7 +46,7 @@ class ClassSubjectSerializer(serializers.ModelSerializer):
         model = ClassSubject
         fields = [
             "id", "classroom", "classroom_name", "subject", "subject_name",
-            "year", "coefficient", "teacher", "teacher_name", "order",
+            "year", "max_score", "teacher", "teacher_name", "order",
         ]
 
 
@@ -100,16 +100,29 @@ class SubjectViewSet(TenantModelViewSet):
 
     @action(detail=False, methods=["post"], url_path="seed-defaults")
     def seed_defaults(self, request):
-        """Crée les matières usuelles de l'élémentaire sénégalais.
+        """Crée le catalogue des matières de l'élémentaire.
 
-        Évite à chaque école de saisir huit matières à la main pour démarrer. Les
-        matières déjà présentes ne sont pas dupliquées.
+        Trente-deux matières relevées sur des bulletins réels des six niveaux —
+        voir `catalogue.py`. Les saisir à la main serait une demi-journée de
+        travail et autant d'occasions de fautes de frappe, qui se paieraient en
+        doublons au bulletin.
+
+        Les matières déjà présentes ne sont pas dupliquées.
         """
-        from .models import DEFAULT_SUBJECTS
+        from .catalogue import SUBJECT_CATALOGUE, all_subject_names, subject_code
+
+        # Barème par défaut d'une matière : celui du niveau le plus fréquent où
+        # elle apparaît. Il ne sert que d'amorce — c'est le barème porté par la
+        # classe qui compte.
+        defaults: dict[str, int] = {}
+        for entries in SUBJECT_CATALOGUE.values():
+            for name, bareme in entries:
+                defaults.setdefault(name, bareme)
 
         existing = set(Subject.objects.values_list("code", flat=True))
         created = []
-        for order, (code, name, coefficient) in enumerate(DEFAULT_SUBJECTS):
+        for order, name in enumerate(all_subject_names()):
+            code = subject_code(name)
             if code in existing:
                 continue
             created.append(
@@ -117,7 +130,7 @@ class SubjectViewSet(TenantModelViewSet):
                     school=request.user.school,
                     code=code,
                     name=name,
-                    default_coefficient=coefficient,
+                    default_max_score=defaults[name],
                     order=order,
                 )
             )
@@ -135,11 +148,95 @@ class ClassSubjectViewSet(TenantModelViewSet):
     filterset_fields = ["classroom", "year", "teacher"]
 
 
+class ClassSubjectApplyCatalogueView(TenantViewSetMixin, APIView):
+    """Applique à une classe le catalogue relevé pour son niveau.
+
+    Trente matières à cocher et à barémer une par une, pour chacune des six
+    classes, c'est une demi-journée et autant d'occasions de se tromper d'un
+    chiffre — une erreur qui ne se voit qu'au bulletin, sur la moyenne.
+
+    Les matières déjà rattachées ne sont pas retouchées : une école qui a ajusté
+    un barème ne doit pas le voir écrasé par un rappel du catalogue.
+    """
+
+    resource = "subject"
+
+    def post(self, request):
+        if request.user.role != Role.ADMIN:
+            raise PermissionDenied("Seul un administrateur configure les matières.")
+
+        from apps.core.models import SchoolYear
+
+        from .catalogue import catalogue_for, subject_code
+
+        classroom = ClassRoom.objects.filter(pk=request.data.get("classroom")).first()
+        if classroom is None:
+            raise NotFound("Classe introuvable.")
+        year = SchoolYear.objects.filter(pk=request.data.get("year")).first()
+        if year is None:
+            raise ValidationError({"year": "Année scolaire introuvable."})
+
+        entries = catalogue_for(classroom.name)
+        if not entries:
+            raise ValidationError(
+                {
+                    "classroom": (
+                        f"Aucun catalogue relevé pour « {classroom.name} ». Les "
+                        "niveaux répertoriés sont CI, CP, CE1, CE2, CM1 et CM2 ; "
+                        "configurez cette classe à la main."
+                    )
+                }
+            )
+
+        existing = set(
+            ClassSubject.objects.filter(classroom=classroom, year=year).values_list(
+                "subject__code", flat=True
+            )
+        )
+        start = ClassSubject.objects.filter(classroom=classroom, year=year).count()
+
+        created = []
+        with transaction.atomic():
+            for offset, (name, max_score) in enumerate(entries):
+                code = subject_code(name)
+                if code in existing:
+                    continue
+                subject, _ = Subject.objects.get_or_create(
+                    school=request.user.school,
+                    code=code,
+                    defaults={"name": name, "default_max_score": max_score},
+                )
+                created.append(
+                    ClassSubject.objects.create(
+                        school=request.user.school,
+                        classroom=classroom,
+                        subject=subject,
+                        year=year,
+                        max_score=max_score,
+                        order=start + offset,
+                    )
+                )
+
+        return Response(
+            {
+                "created": len(created),
+                "skipped": len(entries) - len(created),
+                "total_max_score": sum(entry.max_score for entry in created),
+                "detail": (
+                    f"{len(created)} matière(s) ajoutée(s) à {classroom.name}. "
+                    "Les barèmes sont des références relevées sur des bulletins "
+                    "réels ; ajustez-les si votre pratique diffère."
+                ),
+            },
+            status=201,
+        )
+
+
 class ClassSubjectBulkView(TenantViewSetMixin, APIView):
     """Affectation groupée de matières à une classe.
 
-    L'administration configure une classe en une fois : cocher huit matières et
-    poser leurs coefficients, plutôt que huit créations successives.
+    L'administration configure une classe en une fois : cocher ses matières et
+    poser leurs barèmes, plutôt que trente créations successives.
     """
 
     resource = "subject"
@@ -175,7 +272,7 @@ class ClassSubjectBulkView(TenantViewSetMixin, APIView):
                     year=year,
                     defaults={
                         "school": request.user.school,
-                        "coefficient": int(entry.get("coefficient") or subject.default_coefficient),
+                        "max_score": int(entry.get("max_score") or subject.default_max_score),
                         "teacher_id": entry.get("teacher") or None,
                         "order": order,
                     },
@@ -359,7 +456,7 @@ class GradeEntryViewSet(TenantViewSetMixin, ViewSet):
                         "classroom": sheet.class_subject.classroom.name,
                         "classroom_id": sheet.class_subject.classroom_id,
                         "subject": sheet.class_subject.subject.name,
-                        "coefficient": sheet.class_subject.coefficient,
+                        "max_score": sheet.effective_max_score,
                         "validated": sheet.is_validated,
                         "students": sheet.grades.count(),
                         "entered": sheet.grades.exclude(
@@ -390,7 +487,7 @@ class GradeEntryViewSet(TenantViewSetMixin, ViewSet):
                 "editable": sheet.composition.accepts_grades and not sheet.is_validated,
                 "classroom": sheet.class_subject.classroom.name,
                 "subject": sheet.class_subject.subject.name,
-                "coefficient": sheet.class_subject.coefficient,
+                "max_score": sheet.effective_max_score,
                 "validated": sheet.is_validated,
                 "validated_at": sheet.validated_at,
                 "validated_by": sheet.validated_by,
@@ -576,7 +673,7 @@ class ReportCardViewSet(TenantViewSetMixin, ViewSet):
                 "classroom": classroom.name,
                 "summary": class_summary(composition, classroom),
                 "subjects": [
-                    {"name": s.subject.name, "coefficient": s.coefficient} for s in subjects
+                    {"name": s.subject.name, "max_score": s.max_score} for s in subjects
                 ],
                 "results": sorted(
                     results.values(),

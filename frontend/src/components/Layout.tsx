@@ -106,7 +106,7 @@ const SECTIONS: { group: string; links: NavLinkSpec[] }[] = [
     links: [
       { to: "/enseignants", label: "Enseignants", resource: "teacher" },
       { to: "/paie", label: "Bulletins de paie", resource: "salary" },
-      { to: "/matieres", label: "Matières et coefficients", resource: "subject" },
+      { to: "/matieres", label: "Matières et barèmes", resource: "subject" },
       { to: "/import", label: "Import de données", resource: "dataimport" },
       { to: "/parametres", label: "Paramètres", resource: "reportcard" },
       { to: "/journal", label: "Journal d'audit", resource: "auditlog" },

@@ -26,7 +26,7 @@ type Progress = {
     sheet: number;
     classroom: string;
     subject: string;
-    coefficient: number;
+    max_score: number;
     validated: boolean;
     entered: number;
     expected: number;
@@ -311,7 +311,7 @@ export default function Compositions() {
                   <tr key={row.sheet}>
                     <td>{row.classroom}</td>
                     <td>{row.subject}</td>
-                    <td className="num">{row.coefficient}</td>
+                    <td className="num">{row.max_score}</td>
                     <td className="num">
                       {row.entered} / {row.expected}
                     </td>
