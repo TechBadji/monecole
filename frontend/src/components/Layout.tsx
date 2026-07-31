@@ -1,3 +1,4 @@
+import type { ReactElement } from "react";
 import { NavLink, Outlet } from "react-router-dom";
 
 import { useAuth } from "../auth";
@@ -11,6 +12,54 @@ const ROLE_LABELS: Record<string, string> = {
   TEACHER: "Enseignant",
   PARENT: "Parent",
 };
+
+/**
+ * Icônes de groupe, en trait de 1,6 px sur une grille de 16.
+ *
+ * Elles servent de repère, pas d'ornement : dans une barre de quinze liens, le
+ * regard retrouve « Finances » à sa forme avant d'en lire le mot. Le trait est
+ * volontairement uniforme d'une icône à l'autre — une famille dépareillée
+ * attirerait l'attention sur elle-même.
+ */
+const GROUP_ICONS: Record<string, ReactElement> = {
+  // Quatre panneaux plutôt qu'un cadran : l'arc du compteur et son aiguille se
+  // brouillaient en un gribouillis à 14 px, faute de place pour la graduation.
+  Pilotage: (
+    <path d="M2 2.6h4.6v4.4H2ZM9.4 2.6H14v2.8H9.4ZM2 9.4h4.6v4H2ZM9.4 7.8H14v5.6H9.4Z" />
+  ),
+  Scolarité: (
+    <path d="M8 2.6 14.5 6 8 9.4 1.5 6 8 2.6ZM4 7.5v4c0 1 1.8 1.9 4 1.9s4-.9 4-1.9v-4" />
+  ),
+  "Vie scolaire": (
+    <path d="M3 2.6h7.4L13 5.2v8.2H3V2.6ZM10 2.6v3h3M5.6 8.6h4.8M5.6 11h3.2" />
+  ),
+  // Un billet, et non un signe dollar : la devise ici est le franc CFA.
+  Finances: (
+    <path d="M1.6 4.2h12.8v7.6H1.6V4.2ZM8 10a2 2 0 1 0 0-4 2 2 0 0 0 0 4ZM4 6.2h.01M12 9.8h.01" />
+  ),
+  Administration: (
+    <path d="M6.4 2.4h3.2l.4 1.7 1.6.7 1.5-.9 1.6 2.8-1.2 1.1v1.7l1.2 1.1-1.6 2.8-1.5-.9-1.6.7-.4 1.7H6.4L6 13.2l-1.6-.7-1.5.9L1.3 10.6l1.2-1.1V7.8L1.3 6.7l1.6-2.8 1.5.9L6 4.1l.4-1.7ZM8 9.9a1.9 1.9 0 1 0 0-3.8 1.9 1.9 0 0 0 0 3.8Z" />
+  ),
+};
+
+function GroupIcon({ group }: { group: string }) {
+  const shape = GROUP_ICONS[group];
+  if (!shape) return null;
+  return (
+    <svg
+      className="nav-icon"
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      {shape}
+    </svg>
+  );
+}
 
 type NavLinkSpec = {
   to: string;
@@ -86,7 +135,10 @@ export default function Layout() {
               // héritaient du flux en ligne de ce div et coulaient côte à côte,
               // ce qui coupait « Rapport bilan » en deux et tronquait « Arriérés ».
               <div className="nav-section" key={section.group}>
-                <h2 className="nav-group">{section.group}</h2>
+                <h2 className="nav-group" title={section.group}>
+                  <GroupIcon group={section.group} />
+                  <span className="nav-group-text">{section.group}</span>
+                </h2>
                 {visible.map((link) => (
                   <NavLink
                     key={link.to}
