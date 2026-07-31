@@ -3,47 +3,82 @@
 Le produit n'envoie qu'un seul type de courrier : le **lien de réinitialisation
 de mot de passe**. Tout le reste passe par SMS.
 
-## En développement
+L'expéditeur retenu est **Gmail**, via le compte `techbadji@gmail.com`.
 
-Rien à configurer. Sans `EMAIL_HOST`, Django bascule sur le backend console et
-écrit les messages dans la sortie du serveur — le lien s'y lit et se colle dans
-le navigateur.
+## Configuration
 
-## En production — **à faire avant la mise en service**
-
-Sans les variables ci-dessous, les courriers ne partent pas : ils s'écrivent
-dans les journaux du serveur. L'écran de demande, lui, répondra normalement,
-puisqu'il répond la même chose dans tous les cas. **Le circuit paraîtra
-fonctionner alors que personne ne recevra rien.**
+Dans `backend/.env` — jamais dans `.env.example`, qui est suivi par git :
 
 ```dotenv
-EMAIL_HOST=smtp.exemple.sn
+EMAIL_HOST=smtp.gmail.com
 EMAIL_PORT=587
-EMAIL_HOST_USER=...
-EMAIL_HOST_PASSWORD=...
 EMAIL_USE_TLS=1
-DEFAULT_FROM_EMAIL=MonEcole <ne-pas-repondre@votre-domaine.sn>
+EMAIL_HOST_USER=techbadji@gmail.com
+EMAIL_HOST_PASSWORD=…          # mot de passe d'application, 16 caractères
+DEFAULT_FROM_EMAIL=MonEcole <techbadji@gmail.com>
 
-# Déjà utilisée par les retours de paiement Wave : une seule base pour l'interface.
 PUBLIC_BASE_URL=https://votre-domaine.sn
 ```
 
-`PUBLIC_BASE_URL` sert à composer le lien. Le serveur ne peut pas la deviner : le
-lien pointe vers l'interface, pas vers l'API. Laissée à sa valeur par défaut,
-elle enverra tous les destinataires vers `localhost`.
+La bascule se fait sur la présence des **identifiants**, pas de l'hôte :
+`smtp.gmail.com` est connu d'avance, ce qui manque à une installation neuve
+c'est le mot de passe. Sans eux, Django écrit les messages sur la console.
 
-### Le domaine expéditeur
+### Le mot de passe d'application
 
-Un enregistrement **SPF** et une signature **DKIM** sur le domaine de
-`DEFAULT_FROM_EMAIL` ne sont pas facultatifs. Sans eux, Gmail et Outlook — que
-tout le monde utilise — classent le message en indésirable ou le rejettent. Un
-lien de réinitialisation qui arrive en indésirable est un lien qui n'arrive pas.
+Un mot de passe de compte Google ordinaire **ne fonctionne pas** en SMTP :
+Google a fermé l'accès des « applications moins sécurisées ». Il faut un mot de
+passe d'application, qui exige la validation en deux étapes sur le compte.
 
-Vérifier après configuration :
+1. Activer la validation en deux étapes sur le compte Google.
+2. Se rendre sur <https://myaccount.google.com/apppasswords>.
+3. Créer un mot de passe, nommé par exemple `MonEcole`.
+4. Coller les 16 caractères dans `EMAIL_HOST_PASSWORD`. Les espaces que Google
+   affiche sont décoratifs : avec ou sans, cela fonctionne.
 
-1. Demander une réinitialisation depuis un compte Gmail et un compte Outlook.
-2. Contrôler que le message arrive en boîte de réception, pas en indésirables.
-3. Vérifier que le lien ouvre bien l'interface de production.
+### `PUBLIC_BASE_URL`
+
+Elle compose le lien envoyé, qui pointe vers l'**interface**, pas vers l'API.
+Le serveur ne peut pas la deviner. Laissée à sa valeur par défaut, elle enverra
+tous les destinataires vers `localhost`. La même variable sert aux retours de
+paiement Wave — une seule base pour l'interface.
+
+## Vérifier
+
+```bash
+python manage.py test_email vous@exemple.com
+```
+
+La commande affiche la configuration retenue, refuse de continuer si les
+identifiants manquent, et remonte l'erreur SMTP au lieu de l'avaler. Contrôler
+**la boîte de réception et les indésirables** : un lien de réinitialisation
+classé en indésirable est un lien qui n'arrive pas.
+
+## Ce que Gmail impose
+
+- **L'en-tête `From` est réécrit** avec le compte authentifié. Mettre autre
+  chose dans `DEFAULT_FROM_EMAIL` ne change pas ce que voit le destinataire ;
+  seul un alias vérifié dans les paramètres Gmail le permettrait. Le réglage
+  par défaut s'aligne donc sur `EMAIL_HOST_USER`.
+- **Environ 500 destinataires par jour** sur un compte gratuit (2 000 sur
+  Google Workspace). Pour des réinitialisations de mot de passe, la marge est
+  large.
+- **SPF et DKIM sont ceux de Google**, puisque l'adresse expéditrice est en
+  `@gmail.com` : rien à configurer, contrairement à un envoi depuis un domaine
+  propre. C'est le principal avantage de ce choix.
+
+## Deux réserves
+
+**Le compte est personnel et partagé.** `techbadji@gmail.com` sert déjà au
+projet `pyexam`. Deux conséquences : révoquer le mot de passe d'application
+pour l'un coupe l'autre, et les écoles recevront leurs courriers depuis une
+adresse personnelle — ce qu'un directeur remarque. Pour une mise en service
+commerciale, un compte Google Workspace sur un domaine `monecole.sn` réglerait
+les deux, au prix d'une configuration SPF/DKIM sur ce domaine.
+
+**Le mot de passe d'application donne accès à la boîte entière**, pas seulement
+à l'envoi. Un serveur compromis donne la lecture de la messagerie personnelle.
+C'est la seconde raison de basculer sur un compte dédié avant la production.
 
 ## Ce que le circuit garantit
 
@@ -58,7 +93,7 @@ Vérifier après configuration :
 - Une réinitialisation **ferme toutes les sessions** du compte : ce chemin sert
   précisément quand quelqu'un reprend la main sur un compte compromis.
 
-## Repli si le courrier n'est pas envisageable
+## Repli si le courrier échoue
 
 Un administrateur d'établissement peut fixer un mot de passe provisoire depuis
 la fiche utilisateur (`PATCH /api/users/<id>/`, champ `password`). Ce chemin ne

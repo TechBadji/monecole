@@ -204,19 +204,30 @@ LOGGING = {
 
 # --- Messagerie --------------------------------------------------------------
 # Sert à la réinitialisation de mot de passe, seul usage courrier du produit.
+# L'expéditeur retenu est Gmail — voir docs/messagerie.md.
 #
-# Sans EMAIL_HOST renseigné, Django écrit les messages sur la sortie standard :
-# commode en développement, **inopérant en production**. Une mise en service
-# demande un SMTP et un domaine expéditeur avec SPF et DKIM, faute de quoi les
-# messages partiront en indésirables — voir docs/messagerie.md.
-EMAIL_HOST = os.getenv("EMAIL_HOST", "")
-EMAIL_BACKEND = (
-    "django.core.mail.backends.smtp.EmailBackend"
-    if EMAIL_HOST
-    else "django.core.mail.backends.console.EmailBackend"
-)
+# La bascule se fait sur la présence des **identifiants**, non de l'hôte : celui
+# de Gmail est connu d'avance, ce qui manque à une installation neuve c'est le
+# mot de passe d'application. Sans eux, Django écrit les messages sur la sortie
+# standard : commode en développement, inopérant en production.
+EMAIL_HOST = os.getenv("EMAIL_HOST", "smtp.gmail.com")
 EMAIL_PORT = int(os.getenv("EMAIL_PORT", "587"))
 EMAIL_HOST_USER = os.getenv("EMAIL_HOST_USER", "")
 EMAIL_HOST_PASSWORD = os.getenv("EMAIL_HOST_PASSWORD", "")
 EMAIL_USE_TLS = os.getenv("EMAIL_USE_TLS", "1") == "1"
-DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", "MonEcole <ne-pas-repondre@monecole.sn>")
+EMAIL_TIMEOUT = 15  # un SMTP muet ne doit pas retenir un fil de requête
+
+EMAIL_BACKEND = (
+    "django.core.mail.backends.smtp.EmailBackend"
+    if EMAIL_HOST_USER and EMAIL_HOST_PASSWORD
+    else "django.core.mail.backends.console.EmailBackend"
+)
+
+# Gmail réécrit l'en-tête `From` avec le compte authentifié : mettre autre chose
+# que l'adresse du compte (ou un alias vérifié dans Gmail) ne change rien à ce
+# que verra le destinataire. On s'aligne donc par défaut sur `EMAIL_HOST_USER`,
+# plutôt que d'afficher une adresse qui ne sera pas celle employée.
+DEFAULT_FROM_EMAIL = os.getenv(
+    "DEFAULT_FROM_EMAIL",
+    f"MonEcole <{EMAIL_HOST_USER}>" if EMAIL_HOST_USER else "MonEcole <ne-pas-repondre@monecole.sn>",
+)
