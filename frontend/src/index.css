@@ -2272,3 +2272,40 @@ tr.detail-row:hover > * { background: inherit; }
   color: var(--muted);
   white-space: pre-wrap;
 }
+
+/* Pastilles de sections d'un niveau : CI-A · 18, CI-B · 0… */
+.section-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.section-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding-right: 4px;
+}
+
+/* La croix de suppression n'apparaît que sur une classe vide. Discrète au
+   repos, franche au survol : c'est une action irréversible. */
+.chip-remove {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  margin-left: 2px;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-full);
+  color: var(--muted);
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.chip-remove:hover:not(:disabled) {
+  background: var(--negative);
+  color: #fff;
+}

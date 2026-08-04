@@ -1,10 +1,11 @@
 from django.db import transaction
 from django.db.models import Count, Q, Sum
 from rest_framework.decorators import action
-from rest_framework.exceptions import ValidationError
+from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.response import Response
 
 from apps.core.audit import AuditedModelViewSetMixin
+from apps.core.models import Role
 from apps.core.views_base import TenantModelViewSet
 
 from .models import (
@@ -36,6 +37,140 @@ class ClassRoomViewSet(TenantModelViewSet):
     resource = "classroom"
     filterset_fields = ["level"]
     search_fields = ["name"]
+
+    def destroy(self, request, *args, **kwargs):
+        """Refuse de supprimer une classe qui porte encore des élèves.
+
+        La clé étrangère est en `PROTECT`, donc la base s'y oppose déjà — mais
+        l'exception remonterait en 500 illisible. Ici, l'administrateur apprend
+        combien d'élèves déplacer d'abord.
+        """
+        instance = self.get_object()
+        count = instance.students.count()
+        if count:
+            raise ValidationError(
+                {
+                    "detail": (
+                        f"« {instance.name} » compte encore {count} élève(s). "
+                        "Transférez-les dans une autre classe avant de la "
+                        "supprimer."
+                    )
+                }
+            )
+        return super().destroy(request, *args, **kwargs)
+
+    @action(detail=False, methods=["get"], url_path="grades")
+    def grades(self, request):
+        """Niveaux disponibles et sections déjà créées pour chacun."""
+        from .grades import GRADES, grade_rank
+
+        existing = list(ClassRoom.objects.all())
+        by_rank: dict[int, list] = {}
+        for classroom in existing:
+            by_rank.setdefault(grade_rank(classroom.name), []).append(classroom.name)
+
+        return Response(
+            [
+                {
+                    "code": code,
+                    "label": label,
+                    "level": level,
+                    "sections": sorted(by_rank.get(rank, [])),
+                }
+                for rank, (code, label, level) in enumerate(GRADES)
+            ]
+        )
+
+    @action(detail=False, methods=["post"], url_path="sections")
+    def sections(self, request):
+        """Crée les sections d'un même niveau : CI-A, CI-B, CI-C…
+
+        Une école à deux classes de CI ne doit pas avoir à saisir chaque classe
+        et à deviner son rang d'affichage.
+
+        Si une classe porte le nom nu du niveau — « CI » — elle est **renommée**
+        en « CI-A » plutôt que doublée : garder « CI » à côté de « CI-A » et
+        « CI-B » laisserait une classe sans section, et ses élèves avec elle.
+        Le renommage préserve l'identifiant, donc les élèves, les tarifs et les
+        notes déjà rattachés.
+        """
+        from .grades import display_order, level_of, section_name, SECTION_LETTERS
+
+        if request.user.role != Role.ADMIN:
+            raise PermissionDenied("Seul un administrateur crée des classes.")
+
+        code = (request.data.get("grade") or "").strip().upper()
+        level = level_of(code)
+        if level is None:
+            raise ValidationError({"grade": f"Niveau inconnu : « {code} »."})
+
+        try:
+            count = int(request.data.get("count") or 0)
+        except (TypeError, ValueError):
+            count = 0
+        if not 1 <= count <= len(SECTION_LETTERS):
+            raise ValidationError(
+                {"count": f"Indiquez un nombre de sections entre 1 et {len(SECTION_LETTERS)}."}
+            )
+
+        capacity = request.data.get("capacity") or None
+        created, renamed = [], None
+
+        with transaction.atomic():
+            bare = ClassRoom.objects.filter(name__iexact=code).first()
+            for index in range(count):
+                name = section_name(code, index)
+                order = display_order(code, index)
+
+                if bare is not None and index == 0:
+                    bare.name = name
+                    bare.order = order
+                    bare.level = level
+                    bare.save(update_fields=["name", "order", "level"])
+                    renamed = name
+                    continue
+
+                if ClassRoom.objects.filter(name__iexact=name).exists():
+                    continue
+
+                created.append(
+                    ClassRoom.objects.create(
+                        school=request.user.school,
+                        name=name,
+                        level=level,
+                        order=order,
+                        capacity=capacity or None,
+                    )
+                )
+
+        parts = []
+        if renamed:
+            parts.append(f"« {code} » a été renommée « {renamed} »")
+        if created:
+            parts.append(f"{len(created)} classe(s) créée(s)")
+        if not parts:
+            parts.append("Ces sections existaient déjà")
+
+        return Response(
+            {
+                "created": len(created),
+                "renamed": renamed,
+                "detail": ". ".join(parts) + ".",
+                # `student_count` vient d'une annotation : sans elle, le
+                # sérialiseur renvoie la classe amputée du champ.
+                "classes": ClassRoomSerializer(
+                    ClassRoom.objects.filter(name__istartswith=code)
+                    .annotate(
+                        student_count=Count(
+                            "students", filter=Q(students__status=StudentStatus.ACTIVE)
+                        )
+                    )
+                    .order_by("order", "name"),
+                    many=True,
+                ).data,
+            },
+            status=201,
+        )
 
     def get_queryset(self):
         # `order_by` explicite : le GROUP BY introduit par `annotate` fait perdre

@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { request, tokens } from "../api";
 import { useAuth } from "../auth";
 import { useResource } from "../hooks";
+import ClassSections from "./ClassSections";
 
 const API = import.meta.env.VITE_API_URL ?? "http://localhost:8000/api";
 
@@ -106,13 +107,16 @@ export default function Settings() {
         <div>
           <h1>Paramètres</h1>
           <p>
-            En-tête et mentions du bulletin, horaires et notifications d'assiduité.
+            Classes et sections, en-tête et mentions du bulletin, horaires et
+            notifications d'assiduité.
             {!isAdmin && " Consultation seule : la modification est réservée à l'administrateur."}
           </p>
         </div>
       </div>
 
       {status && <div className={`alert ${status.kind}`}>{status.text}</div>}
+
+      <ClassSections isAdmin={isAdmin} />
 
       <div className="card">
         <div className="card-title">Bulletin scolaire</div>
