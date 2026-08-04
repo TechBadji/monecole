@@ -2231,3 +2231,44 @@ tr.detail-row:hover > * { background: inherit; }
 
 .situation .stats { margin-bottom: var(--space-4); }
 .situation .table-wrap { background: var(--surface); border: 1px solid var(--border); }
+
+/* ==========================================================================
+   Écran en échec
+   ==========================================================================
+   Ce qui s'affiche à la place d'une page blanche. Volontairement sobre : il ne
+   s'agit pas d'un état à mettre en valeur, mais d'un état à rendre lisible et
+   réparable. */
+
+.route-error {
+  max-width: 56ch;
+  padding: var(--space-10) 0;
+}
+
+.route-error h1 {
+  margin-bottom: var(--space-3);
+  font-size: var(--text-xl);
+}
+
+.route-error p {
+  margin-bottom: var(--space-6);
+  font-size: var(--text-md);
+  line-height: var(--leading-normal);
+  color: var(--text-secondary);
+}
+
+.route-error .page-actions {
+  align-items: center;
+  gap: var(--space-4);
+}
+
+.route-error-detail {
+  margin: var(--space-8) 0 0;
+  padding: var(--space-3) var(--space-4);
+  overflow-x: auto;
+  background: var(--surface-sunken);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-sm);
+  color: var(--muted);
+  white-space: pre-wrap;
+}

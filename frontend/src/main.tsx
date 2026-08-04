@@ -8,6 +8,7 @@ import { SyncBanner } from "./components/OfflineBanners";
 import { startSyncWatcher } from "./offline/sync";
 import ForgotPassword from "./pages/ForgotPassword";
 import Login from "./pages/Login";
+import RouteBoundary from "./components/RouteBoundary";
 import ResetPassword from "./pages/ResetPassword";
 
 // Écrans chargés à la demande. Un comptable qui saisit des encaissements n'a pas à
@@ -44,7 +45,21 @@ import "./index.css";
 function Guarded({ resource, children }: { resource: string; children: ReactNode }) {
   const { can } = useAuth();
   if (!can(resource, "view")) return <Navigate to="/" replace />;
-  return <Suspense fallback={<div className="spinner">Chargement…</div>}>{children}</Suspense>;
+  return <Screen>{children}</Screen>;
+}
+
+/**
+ * Écran chargé à la demande : attente pendant le chargement, message si le
+ * chargement échoue. Sans la barrière, un module introuvable — cas courant
+ * après un déploiement, quand le service worker garde un fragment périmé —
+ * vidait toute la page sans rien dire.
+ */
+function Screen({ children }: { children: ReactNode }) {
+  return (
+    <RouteBoundary>
+      <Suspense fallback={<div className="spinner">Chargement…</div>}>{children}</Suspense>
+    </RouteBoundary>
+  );
 }
 
 /** La page d'accueil dépend du rôle : chacun arrive sur ce qu'il utilise. */
@@ -52,9 +67,9 @@ function Home() {
   const { can } = useAuth();
   if (can("report", "view")) {
     return (
-      <Suspense fallback={<div className="spinner">Chargement…</div>}>
+      <Screen>
         <Dashboard />
-      </Suspense>
+      </Screen>
     );
   }
   if (can("monthlypayment", "view")) return <Navigate to="/encaissements" replace />;
@@ -69,9 +84,9 @@ function Root() {
   // Un parent n'entre jamais dans l'administration : son interface est le portail.
   if (profile?.role === "PARENT") {
     return (
-      <Suspense fallback={<div className="spinner">Chargement…</div>}>
+      <Screen>
         <ParentPortal />
-      </Suspense>
+      </Screen>
     );
   }
   // Hors session, trois écrans sont joignables. Sans ces routes, le lien reçu
@@ -96,9 +111,9 @@ function Root() {
         <Route
           path="compte"
           element={
-            <Suspense fallback={<div className="spinner">Chargement…</div>}>
+            <Screen>
               <Account />
-            </Suspense>
+            </Screen>
           }
         />
         <Route

@@ -11,7 +11,10 @@
  * données financières.
  */
 
-const CACHE = "monecole-shell-v1";
+// Incrémenté à chaque changement de stratégie : l'activation purge les caches
+// des versions précédentes, ce qui est le seul moyen de rattraper les postes qui
+// tournent encore avec l'ancien worker.
+const CACHE = "monecole-shell-v2";
 const OFFLINE_URL = "/";
 
 self.addEventListener("install", (event) => {
@@ -32,6 +35,22 @@ self.addEventListener("activate", (event) => {
   );
 });
 
+/**
+ * Une ressource n'est mise en cache d'abord que si son nom porte une empreinte.
+ *
+ * C'est la condition qui rend le « cache d'abord » sûr : une URL empreintée
+ * désigne un contenu immuable, donc jamais périmé à tort. Le commentaire
+ * précédent affirmait cet invariant sans le vérifier — et il était faux en
+ * développement, où Vite sert `/src/pages/Encaissements.tsx` à une URL stable.
+ * Le worker gardait alors indéfiniment la version d'avant un déploiement, et la
+ * page devenait blanche au premier champ disparu.
+ *
+ * Vite produit `/assets/nom-[hash].js`. Tout le reste passe par le réseau.
+ */
+function isImmutable(url) {
+  return /^\/assets\/.+-[A-Za-z0-9_-]{8,}\.[a-z0-9]+$/.test(url.pathname);
+}
+
 self.addEventListener("fetch", (event) => {
   const { request } = event;
 
@@ -51,19 +70,34 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  // Ressources statiques : cache d'abord, puis réseau — elles sont versionnées
-  // par le nom de fichier, donc jamais périmées à tort.
+  if (isImmutable(url)) {
+    event.respondWith(
+      caches.match(request).then((cached) => {
+        if (cached) return cached;
+        return fetch(request).then((response) => {
+          if (response.ok && response.type === "basic") {
+            const copy = response.clone();
+            caches.open(CACHE).then((cache) => cache.put(request, copy));
+          }
+          return response;
+        });
+      }),
+    );
+    return;
+  }
+
+  // Le reste — modules de développement, polices, icônes servies à une URL
+  // stable — passe par le réseau, avec le cache en filet hors ligne seulement.
   event.respondWith(
-    caches.match(request).then((cached) => {
-      if (cached) return cached;
-      return fetch(request).then((response) => {
+    fetch(request)
+      .then((response) => {
         if (response.ok && response.type === "basic") {
           const copy = response.clone();
           caches.open(CACHE).then((cache) => cache.put(request, copy));
         }
         return response;
-      });
-    }),
+      })
+      .catch(() => caches.match(request).then((cached) => cached || Response.error())),
   );
 });
 
