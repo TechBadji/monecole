@@ -2309,3 +2309,146 @@ tr.detail-row:hover > * { background: inherit; }
   background: var(--negative);
   color: #fff;
 }
+
+/* ==========================================================================
+   Questions fréquentes
+   ==========================================================================
+   Surface de lecture : la mesure du texte prime sur la densité, contrairement
+   au reste de l'application. */
+
+.faq-standalone {
+  max-width: 78ch;
+  margin: 0 auto;
+  padding: var(--space-12) var(--space-5) var(--space-12);
+}
+
+.faq .page-head p {
+  max-width: 62ch;
+}
+
+.faq-search {
+  max-width: 380px;
+  margin-bottom: var(--space-6);
+}
+
+.faq-count {
+  margin: calc(var(--space-4) * -1) 0 var(--space-6);
+  font-size: var(--text-base);
+}
+
+.faq-section {
+  margin-bottom: var(--space-10);
+}
+
+.faq-section > h2 {
+  margin-bottom: var(--space-1);
+  font-size: var(--text-lg);
+}
+
+.faq-section > p.muted {
+  margin-bottom: var(--space-4);
+  font-size: var(--text-base);
+}
+
+.faq-item {
+  border-top: 1px solid var(--border);
+}
+
+.faq-item:last-of-type {
+  border-bottom: 1px solid var(--border);
+}
+
+.faq-item > summary {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  padding: var(--space-4) 0;
+  font-size: var(--text-md);
+  font-weight: var(--weight-medium);
+  color: var(--text);
+  cursor: pointer;
+  list-style: none;
+}
+
+/* Le triangle par défaut est retiré au profit d'un chevron qui pivote : celui
+   de Safari se place mal et ne suit pas la ligne de base du texte. */
+.faq-item > summary::-webkit-details-marker { display: none; }
+
+.faq-item > summary::before {
+  content: "";
+  flex-shrink: 0;
+  width: 7px;
+  height: 7px;
+  margin-top: 2px;
+  border-right: 1.7px solid var(--muted);
+  border-bottom: 1.7px solid var(--muted);
+  transform: rotate(-45deg);
+  transition: transform 0.16s ease;
+}
+
+.faq-item[open] > summary::before {
+  transform: rotate(45deg);
+}
+
+.faq-item > summary:hover {
+  color: var(--brand);
+}
+
+.faq-answer {
+  padding: 0 0 var(--space-5) calc(7px + var(--space-3));
+  max-width: 68ch;
+  font-size: var(--text-base);
+  line-height: 1.65;
+  color: var(--text-secondary);
+}
+
+.faq-answer p + p,
+.faq-answer ul {
+  margin-top: var(--space-3);
+}
+
+.faq-answer ul {
+  padding-left: var(--space-5);
+  display: grid;
+  gap: var(--space-2);
+}
+
+.faq-answer code {
+  padding: 1px 5px;
+  background: var(--surface-sunken);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  font-size: var(--text-sm);
+}
+
+.faq-answer kbd {
+  padding: 1px 6px;
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  font-family: inherit;
+  font-size: var(--text-sm);
+}
+
+.faq-back {
+  padding-top: var(--space-6);
+  border-top: 1px solid var(--border);
+}
+
+/* Le lien de la vitrine vit sur le marine : le gris du lien discret y serait
+   illisible. */
+.quiet-link.on-brand {
+  color: rgb(255 255 255 / 82%);
+  text-decoration-color: rgb(255 255 255 / 30%);
+}
+
+.quiet-link.on-brand:hover {
+  color: var(--on-brand);
+  text-decoration-color: currentColor;
+}
+
+.access-help {
+  margin-top: var(--space-5);
+  font-size: var(--text-base);
+}

@@ -14,6 +14,7 @@ import ResetPassword from "./pages/ResetPassword";
 // Écrans chargés à la demande. Un comptable qui saisit des encaissements n'a pas à
 // télécharger la bibliothèque de graphiques du tableau de bord, ni le module de paie.
 const Account = lazy(() => import("./pages/Account"));
+const Faq = lazy(() => import("./pages/Faq"));
 const Arrears = lazy(() => import("./pages/Arrears"));
 const Attendance = lazy(() => import("./pages/Attendance"));
 const Compositions = lazy(() => import("./pages/Compositions"));
@@ -95,6 +96,14 @@ function Root() {
   if (!profile) {
     return (
       <Routes>
+        <Route
+          path="/aide"
+          element={
+            <Screen>
+              <Faq />
+            </Screen>
+          }
+        />
         <Route path="/mot-de-passe-oublie" element={<ForgotPassword />} />
         <Route path="/reinitialiser" element={<ResetPassword />} />
         <Route path="*" element={<Login />} />
@@ -108,6 +117,14 @@ function Root() {
         <Route index element={<Home />} />
         {/* Aucun `Guarded` : chacun accède à son propre compte, quel que soit
             son rôle. */}
+        <Route
+          path="aide"
+          element={
+            <Screen>
+              <Faq embedded />
+            </Screen>
+          }
+        />
         <Route
           path="compte"
           element={

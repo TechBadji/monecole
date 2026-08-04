@@ -1,4 +1,5 @@
 import type { FormEvent, ReactNode } from "react";
+import { Link } from "react-router-dom";
 
 /**
  * La scène commune aux trois écrans d'accès : connexion, mot de passe oublié,
@@ -71,6 +72,12 @@ export default function LoginShell({
             saisi, quand, et ce qui a changé.
           </li>
         </ul>
+
+        <p className="access-help">
+          <Link to="/aide" className="quiet-link on-brand">
+            Questions fréquentes
+          </Link>
+        </p>
       </section>
 
       <section className="access-card-zone">

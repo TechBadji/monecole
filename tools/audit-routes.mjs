@@ -51,6 +51,7 @@ const ROUTES = JSON.parse(process.env.ROUTES || "null") ?? [
   ["/parametres", "Paramètres"],
   ["/journal", "Journal d'audit"],
   ["/compte", "Mon compte"],
+  ["/aide", "Questions fréquentes"],
   ["/route-inexistante", "Route inconnue (doit rediriger)"],
 ];
 

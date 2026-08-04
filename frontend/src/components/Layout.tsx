@@ -170,6 +170,17 @@ function UserChip() {
             Mon compte
           </button>
 
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => {
+              setOpen(false);
+              navigate("/aide");
+            }}
+          >
+            Questions fréquentes
+          </button>
+
           <div className="user-menu-row">
             <span>Apparence</span>
             <ThemeToggle />
