@@ -2,13 +2,30 @@ import os
 from datetime import timedelta
 from pathlib import Path
 
+from django.core.exceptions import ImproperlyConfigured
+
 from dotenv import load_dotenv
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(BASE_DIR / ".env")
 
-SECRET_KEY = os.getenv("DJANGO_SECRET_KEY", "dev-insecure-key")
+DEV_SECRET_KEY = "dev-insecure-key"
+SECRET_KEY = os.getenv("DJANGO_SECRET_KEY", DEV_SECRET_KEY)
 DEBUG = os.getenv("DJANGO_DEBUG", "0") == "1"
+
+# Refus de démarrer plutôt que de démarrer vulnérable.
+#
+# Cette clé signe les jetons JWT. Sa valeur de repli est écrite dans un dépôt
+# **public** : un déploiement qui l'oublie laisse quiconque forger un jeton
+# d'administrateur pour n'importe quel établissement. Un avertissement dans les
+# journaux ne serait pas lu ; une exception, si.
+if not DEBUG and SECRET_KEY == DEV_SECRET_KEY:
+    raise ImproperlyConfigured(
+        "DJANGO_SECRET_KEY n'est pas renseignée. La valeur de repli est publique "
+        "et signe les jetons d'authentification : elle ne peut pas servir hors "
+        "développement. Générer une clé avec :\n"
+        "  python -c \"import secrets; print(secrets.token_urlsafe(64))\""
+    )
 ALLOWED_HOSTS = os.getenv("DJANGO_ALLOWED_HOSTS", "*").split(",")
 
 INSTALLED_APPS = [
@@ -184,6 +201,7 @@ if not DEBUG:
     CSRF_COOKIE_SECURE = True
     SECURE_HSTS_SECONDS = 31536000
     SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+    SECURE_HSTS_PRELOAD = True
     SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 
 LOGGING = {

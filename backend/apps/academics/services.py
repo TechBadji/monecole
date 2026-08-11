@@ -69,7 +69,11 @@ def student_results(composition, classroom):
             value = grade.value if grade and grade.counts else None
             # Le barème de l'épreuve prime sur celui de la classe : la même
             # matière est notée sur 4 à un contrôle et sur 12 au suivant.
-            max_score = sheet.effective_max_score if sheet else class_subject.max_score
+            # `class_subject` est déjà chargé : passer par
+            # `sheet.effective_max_score` déclencherait un accès paresseux à
+            # `sheet.class_subject`, soit une requête par matière — mesuré à
+            # 33 requêtes pour une classe de 29 matières, contre 5.
+            max_score = (sheet.max_score if sheet else None) or class_subject.max_score
 
             line = {
                 "class_subject": class_subject.id,

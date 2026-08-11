@@ -290,3 +290,53 @@ class ParentPortalScopeTests(TestCase):
         self.assertEqual(response.status_code, 200)
         names = [row["full_name"] for row in response.data["results"]]
         self.assertNotIn("Moussa Fall", names)
+
+
+class ParentSessionTests(TestCase):
+    """La session d'un parent doit être révocable comme celle du personnel.
+
+    Sans identifiant de session, le téléphone d'un parent perdu ou volé reste
+    connecté jusqu'à l'expiration du jeton, sans que personne puisse
+    l'interrompre.
+    """
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.school = make_school()
+        cls.year = make_year(cls.school)
+        cls.classroom = make_classroom(cls.school, "CP")
+        make_fee_schedule(cls.school, cls.classroom, cls.year)
+        cls.student = make_student(cls.school, cls.classroom, "Awa", "Diop")
+        with tenant_context(cls.school):
+            cls.student.parent_phone = PHONE
+            cls.student.save()
+
+    def setUp(self):
+        cache.clear()
+        self.client = APIClient()
+
+    def test_a_parent_login_opens_a_revocable_session(self):
+        from apps.core.models import LoginSession
+
+        with tenant_context(self.school):
+            _otp, code = OtpCode.issue(self.school, NORMALIZED)
+
+        response = self.client.post(
+            "/api/portal/auth/verify-code/",
+            {"phone": PHONE, "code": code},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 200, response.data)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {response.data['access']}")
+        self.assertEqual(self.client.get("/api/portal/children/").status_code, 200)
+
+        with unscoped():
+            session = LoginSession.objects.filter(
+                user__role=Role.PARENT
+            ).latest("created_at")
+            self.assertIsNone(session.revoked_at)
+            session.revoked_at = timezone.now()
+            session.save(update_fields=["revoked_at"])
+
+        # Sans `sid` dans le jeton, cet appel répondrait encore 200.
+        self.assertEqual(self.client.get("/api/portal/children/").status_code, 401)

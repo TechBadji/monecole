@@ -1,7 +1,9 @@
 """Authentification du portail parent et pilotage des rappels."""
 
 import logging
+from uuid import uuid4
 
+from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.db.models import Q
 from django.utils import timezone
@@ -14,7 +16,8 @@ from rest_framework.views import APIView
 from rest_framework.viewsets import ViewSet
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from apps.core.models import Notification, Role, School
+from apps.core.account import client_ip, device_label
+from apps.core.models import LoginSession, Notification, Role, School
 from apps.core.tenancy import tenant_context, unscoped
 from apps.core.views_base import TenantViewSetMixin
 from apps.students.models import Family, Student, StudentStatus
@@ -146,6 +149,23 @@ class ParentOtpVerifyView(APIView):
         refresh = RefreshToken.for_user(user)
         refresh["role"] = user.role
         refresh["school_id"] = user.school_id
+        # Un `sid`, comme à la connexion du personnel. Sans lui, la session d'un
+        # parent échappe à la révocation : le téléphone d'un parent perdu ou
+        # volé resterait connecté jusqu'à l'expiration du jeton, sans que
+        # personne puisse l'interrompre.
+        refresh["sid"] = uuid4().hex
+
+        LoginSession.objects.update_or_create(
+            sid=refresh["sid"],
+            defaults={
+                "user": user,
+                "device_label": device_label(request),
+                "ip_address": client_ip(request),
+                "remembered": False,
+                "expires_at": timezone.now() + settings.SESSION_REFRESH_LIFETIME,
+                "revoked_at": None,
+            },
+        )
 
         return Response(
             {

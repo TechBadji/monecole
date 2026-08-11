@@ -1,6 +1,7 @@
 """Matières, compositions, saisie des notes et bulletins."""
 
 from django.db import transaction
+from django.db.models import Count, Q
 from django.utils import timezone
 from rest_framework import serializers
 from rest_framework.decorators import action
@@ -427,9 +428,19 @@ class GradeEntryViewSet(TenantViewSetMixin, ViewSet):
         return Teacher.objects.filter(email__iexact=user.email, is_active=True).first()
 
     def _accessible_sheets(self, user):
+        # Les deux décomptes sont annotés plutôt que comptés feuille par
+        # feuille : la liste d'un enseignant de vingt-neuf matières déclenchait
+        # cinquante-huit requêtes supplémentaires.
         sheets = GradeSheet.objects.select_related(
             "composition", "class_subject__subject", "class_subject__classroom",
             "class_subject__teacher",
+        ).annotate(
+            student_total=Count("grades", distinct=True),
+            entered_total=Count(
+                "grades",
+                filter=~Q(grades__value__isnull=True, grades__is_absent=False),
+                distinct=True,
+            ),
         )
         if user.role == Role.TEACHER:
             teacher = self._teacher_of(user)
@@ -458,10 +469,8 @@ class GradeEntryViewSet(TenantViewSetMixin, ViewSet):
                         "subject": sheet.class_subject.subject.name,
                         "max_score": sheet.effective_max_score,
                         "validated": sheet.is_validated,
-                        "students": sheet.grades.count(),
-                        "entered": sheet.grades.exclude(
-                            value__isnull=True, is_absent=False
-                        ).count(),
+                        "students": sheet.student_total,
+                        "entered": sheet.entered_total,
                     }
                     for sheet in sheets.order_by(
                         "class_subject__classroom__order", "class_subject__order"
