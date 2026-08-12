@@ -4,6 +4,7 @@ import { request, tokens } from "../api";
 import { useAuth } from "../auth";
 import { useResource } from "../hooks";
 import ClassSections from "./ClassSections";
+import SchoolYears from "./SchoolYears";
 
 const API = import.meta.env.VITE_API_URL ?? "http://localhost:8000/api";
 
@@ -107,7 +108,7 @@ export default function Settings() {
         <div>
           <h1>Paramètres</h1>
           <p>
-            Classes et sections, en-tête et mentions du bulletin, horaires et
+            Années scolaires, classes et sections, en-tête du bulletin, horaires et
             notifications d'assiduité.
             {!isAdmin && " Consultation seule : la modification est réservée à l'administrateur."}
           </p>
@@ -115,6 +116,8 @@ export default function Settings() {
       </div>
 
       {status && <div className={`alert ${status.kind}`}>{status.text}</div>}
+
+      <SchoolYears isAdmin={isAdmin} />
 
       <ClassSections isAdmin={isAdmin} />
 

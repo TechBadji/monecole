@@ -2452,3 +2452,95 @@ tr.detail-row:hover > * { background: inherit; }
   margin-top: var(--space-5);
   font-size: var(--text-base);
 }
+
+/* Sélecteur d'année, en tête de barre. Il commande toute l'application : sa
+   place est avec la navigation, pas dans un écran. */
+.year-selector {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: var(--space-3) var(--space-2);
+  border-top: 1px solid rgb(255 255 255 / 11%);
+  border-bottom: 1px solid rgb(255 255 255 / 11%);
+}
+
+.year-selector label {
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: rgb(255 255 255 / 82%);
+}
+
+.year-selector select {
+  padding: 5px var(--space-2);
+  background: rgb(255 255 255 / 8%);
+  border: 1px solid rgb(255 255 255 / 16%);
+  border-radius: var(--radius-sm);
+  color: var(--on-brand);
+  font-size: var(--text-base);
+}
+
+/* Une année close se signale sur le sélecteur lui-même : la bande peut être
+   défilée hors de vue, le sélecteur non. */
+.year-selector.past select {
+  background: var(--warning);
+  border-color: var(--warning);
+  color: #fff;
+  font-weight: var(--weight-medium);
+}
+
+.past-year-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+  margin-bottom: var(--space-5);
+}
+
+.quiet-link.as-button {
+  padding: 0;
+  background: none;
+  border: 0;
+  cursor: pointer;
+  font: inherit;
+}
+
+.settings-subtitle {
+  margin: var(--space-8) 0 var(--space-3);
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
+}
+
+.promotion-preview {
+  max-height: 420px;
+  overflow-y: auto;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* Un secret à recopier : chasse fixe, fond neutre, sélection facile. */
+.secret {
+  padding: 3px 8px;
+  background: var(--surface-sunken);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: var(--text-base);
+  letter-spacing: 0.04em;
+  user-select: all;
+}
+
+.provisioned {
+  border-color: var(--warning);
+}

@@ -9,11 +9,14 @@ import { startSyncWatcher } from "./offline/sync";
 import ForgotPassword from "./pages/ForgotPassword";
 import Login from "./pages/Login";
 import RouteBoundary from "./components/RouteBoundary";
+import ChangePassword from "./pages/ChangePassword";
+import { YearProvider } from "./year";
 import ResetPassword from "./pages/ResetPassword";
 
 // Écrans chargés à la demande. Un comptable qui saisit des encaissements n'a pas à
 // télécharger la bibliothèque de graphiques du tableau de bord, ni le module de paie.
 const Account = lazy(() => import("./pages/Account"));
+const Schools = lazy(() => import("./pages/Schools"));
 const Faq = lazy(() => import("./pages/Faq"));
 const Arrears = lazy(() => import("./pages/Arrears"));
 const Attendance = lazy(() => import("./pages/Attendance"));
@@ -111,6 +114,10 @@ function Root() {
     );
   }
 
+  // Mot de passe provisoire : le serveur refuse déjà tout le reste, l'interface
+  // n'a donc rien d'autre à proposer que l'écran de changement.
+  if (profile.must_change_password) return <ChangePassword />;
+
   return (
     <Routes>
       <Route element={<Layout />}>
@@ -123,6 +130,14 @@ function Root() {
             <Screen>
               <Faq embedded />
             </Screen>
+          }
+        />
+        <Route
+          path="etablissements"
+          element={
+            <Guarded resource="school">
+              <Schools />
+            </Guarded>
           }
         />
         <Route
@@ -291,7 +306,11 @@ createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <BrowserRouter>
       <AuthProvider>
-        <App />
+        {/* Sous `AuthProvider` : le contexte d'année interroge l'API, donc il
+            lui faut un jeton. */}
+        <YearProvider>
+          <App />
+        </YearProvider>
       </AuthProvider>
     </BrowserRouter>
   </StrictMode>,

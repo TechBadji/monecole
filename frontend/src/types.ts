@@ -26,6 +26,7 @@ export type Profile = {
   initials: string;
   role: Role;
   role_label: string;
+  must_change_password: boolean;
   school: { id: number; name: string; currency: string } | null;
   permissions: Record<string, string[]>;
 };
@@ -138,6 +139,7 @@ export type SchoolYear = {
   label: string;
   start_date: string;
   end_date: string;
+  tuition_months: number;
   is_current: boolean;
 };
 

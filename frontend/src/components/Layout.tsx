@@ -3,6 +3,7 @@ import { NavLink, Outlet, useNavigate } from "react-router-dom";
 
 import { useAuth } from "../auth";
 import { Avatar } from "../pages/Account";
+import { PastYearBanner, YearSelector } from "../year";
 import ThemeToggle from "./ThemeToggle";
 
 const ROLE_LABELS: Record<string, string> = {
@@ -37,6 +38,9 @@ const GROUP_ICONS: Record<string, ReactElement> = {
   // Un billet, et non un signe dollar : la devise ici est le franc CFA.
   Finances: (
     <path d="M1.6 4.2h12.8v7.6H1.6V4.2ZM8 10a2 2 0 1 0 0-4 2 2 0 0 0 0 4ZM4 6.2h.01M12 9.8h.01" />
+  ),
+  Plateforme: (
+    <path d="M2.6 5.4 8 2.4l5.4 3v5.2L8 13.6l-5.4-3V5.4ZM8 8.4l5.4-3M8 8.4v5.2M8 8.4 2.6 5.4" />
   ),
   Administration: (
     <path d="M6.4 2.4h3.2l.4 1.7 1.6.7 1.5-.9 1.6 2.8-1.2 1.1v1.7l1.2 1.1-1.6 2.8-1.5-.9-1.6.7-.4 1.7H6.4L6 13.2l-1.6-.7-1.5.9L1.3 10.6l1.2-1.1V7.8L1.3 6.7l1.6-2.8 1.5.9L6 4.1l.4-1.7ZM8 9.9a1.9 1.9 0 1 0 0-3.8 1.9 1.9 0 0 0 0 3.8Z" />
@@ -110,6 +114,14 @@ const SECTIONS: { group: string; links: NavLinkSpec[] }[] = [
       { to: "/import", label: "Import de données", resource: "dataimport" },
       { to: "/parametres", label: "Paramètres", resource: "reportcard" },
       { to: "/journal", label: "Journal d'audit", resource: "auditlog" },
+    ],
+  },
+  {
+    group: "Plateforme",
+    links: [
+      // La matrice réserve l'écriture sur `school` au super-administrateur ; un
+      // administrateur d'école n'y verrait que la sienne, sans intérêt.
+      { to: "/etablissements", label: "Établissements", resource: "school" },
     ],
   },
 ];
@@ -234,6 +246,8 @@ export default function Layout() {
           <small>{profile?.school?.name ?? "Plateforme"}</small>
         </div>
 
+        <YearSelector />
+
         <nav className="nav">
           {SECTIONS.map((section) => {
             // Une section dont aucune entrée n'est accessible ne s'affiche pas :
@@ -270,6 +284,7 @@ export default function Layout() {
       </aside>
 
       <main className="main">
+        <PastYearBanner />
         <Outlet />
       </main>
     </div>
