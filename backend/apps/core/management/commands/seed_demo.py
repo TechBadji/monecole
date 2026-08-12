@@ -473,6 +473,14 @@ class Command(BaseCommand):
                 default_max_score=bareme, order=order,
             )
 
+        # Un titulaire par classe, préscolaire compris : c'est lui qui tient
+        # toutes les matières. Tirer un enseignant différent par matière
+        # produirait des bulletins où chaque ligne porte un nom distinct — ce
+        # qu'aucune école primaire ne connaît.
+        for index, classroom in enumerate(classrooms):
+            classroom.teacher = teachers[index % len(teachers)]
+            classroom.save(update_fields=["teacher"])
+
         # Seul l'élémentaire est noté : le préscolaire ne compose pas.
         primary = [c for c in classrooms if c.level == Level.PRIMARY]
         for classroom in primary:
@@ -484,7 +492,6 @@ class Command(BaseCommand):
                     subject=subjects[name],
                     year=year,
                     max_score=max_score,
-                    teacher=random.choice(teachers[:7]),
                     order=order,
                 )
 

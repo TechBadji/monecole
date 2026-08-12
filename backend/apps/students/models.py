@@ -15,10 +15,30 @@ class Level(models.TextChoices):
 
 
 class ClassRoom(TenantScopedModel):
-    """Classe. Les dix classes du classeur source, dans l'ordre pédagogique."""
+    """Classe. Les dix niveaux du classeur source, dans l'ordre pédagogique.
+
+    **L'enseignant est rattaché à la classe, pas à la matière.** C'est le
+    fonctionnement de l'élémentaire : un maître ou une maîtresse tient toutes
+    les matières de sa classe. Les bulletins de l'école pilote le montrent —
+    Madame NDIONE sur les dix-neuf matières du CM2, Madame DIENG sur celles du
+    CP.
+
+    `ClassSubject.teacher` reste disponible pour l'exception : un intervenant
+    d'arabe ou d'anglais, courant dans les écoles franco-arabes, qui ne prend
+    qu'une matière. Vide, il vaut « le titulaire de la classe ».
+    """
 
     name = models.CharField("nom", max_length=30)
     level = models.CharField("cycle", max_length=20, choices=Level.choices)
+    teacher = models.ForeignKey(
+        "staff.Teacher",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="classrooms",
+        verbose_name="titulaire",
+        help_text="Enseignant de la classe. Il saisit les notes de toutes ses matières.",
+    )
     order = models.PositiveSmallIntegerField(
         "rang", default=0, help_text="Ordre d'affichage, de la garderie au CM2."
     )

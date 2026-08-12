@@ -37,7 +37,7 @@ def student_results(composition, classroom):
 
     subjects = list(
         ClassSubject.objects.filter(classroom=classroom, year=composition.year)
-        .select_related("subject", "teacher")
+        .select_related("subject", "teacher", "classroom__teacher")
         .order_by("order", "subject__order")
     )
     sheets = {
@@ -83,7 +83,11 @@ def student_results(composition, classroom):
                 "is_absent": bool(grade and grade.is_absent),
                 "comment": grade.comment if grade else "",
                 "validated": bool(sheet and sheet.is_validated),
-                "teacher": class_subject.teacher.full_name if class_subject.teacher else None,
+                "teacher": (
+                    class_subject.effective_teacher.full_name
+                    if class_subject.effective_teacher
+                    else None
+                ),
             }
             lines.append(line)
 

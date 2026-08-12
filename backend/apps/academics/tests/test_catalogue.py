@@ -336,3 +336,101 @@ class SheetFilteringTests(TestCase):
             format="json",
         )
         self.assertEqual(response.status_code, 400, response.data)
+
+
+class ClassTeacherTests(TestCase):
+    """Le titulaire tient toutes les matières de sa classe.
+
+    C'est le fonctionnement de l'élémentaire, et ce que montrent les bulletins
+    de l'école pilote : une seule enseignante sur les dix-neuf matières du CM2.
+    Attribuer un enseignant matière par matière imposerait vingt-neuf gestes
+    par classe.
+    """
+
+    @classmethod
+    def setUpTestData(cls):
+        from apps.staff.models import Teacher
+
+        cls.school = make_school()
+        cls.year = make_year(cls.school)
+        cls.admin = make_user(cls.school, Role.ADMIN, "admin@test.sn")
+        cls.titulaire_user = make_user(cls.school, Role.TEACHER, "maitre@test.sn")
+        cls.arabe_user = make_user(cls.school, Role.TEACHER, "arabe@test.sn")
+
+        with tenant_context(cls.school):
+            cls.titulaire = Teacher.objects.create(
+                school=cls.school, first_name="Fatou", last_name="Ndione",
+                email="maitre@test.sn",
+            )
+            cls.intervenant = Teacher.objects.create(
+                school=cls.school, first_name="Cheikh", last_name="Sy",
+                email="arabe@test.sn",
+            )
+            cls.room = make_classroom(cls.school, "CE2-A", order=70)
+            cls.room.teacher = cls.titulaire
+            cls.room.save()
+            cls.autre = make_classroom(cls.school, "CM1-A", order=80)
+
+            cls.composition = Composition.objects.create(
+                school=cls.school, year=cls.year, name="1er contrôle",
+                kind=Composition.Kind.TERM, term=1, date=cls.year.start_date,
+                status=Composition.Status.OPEN,
+            )
+
+            cls.links = {}
+            for name, room, intervenant in [
+                ("Grammaire", cls.room, None),
+                ("Arabe", cls.room, cls.intervenant),
+                ("Histoire", cls.autre, None),
+            ]:
+                subject = Subject.objects.create(
+                    school=cls.school, code=subject_code(name + room.name),
+                    name=name, default_max_score=10,
+                )
+                link = ClassSubject.objects.create(
+                    school=cls.school, classroom=room, subject=subject,
+                    year=cls.year, max_score=10, teacher=intervenant,
+                )
+                cls.links[name] = link
+                GradeSheet.objects.create(
+                    school=cls.school, composition=cls.composition, class_subject=link
+                )
+
+    def sheets_for(self, user):
+        client = APIClient()
+        client.force_authenticate(user)
+        response = client.get("/api/grade-sheets/")
+        self.assertEqual(response.status_code, 200, response.data)
+        return {row["subject"] for row in response.data["results"]}
+
+    def test_the_class_teacher_sees_every_subject_of_the_class(self):
+        """Sans intervenant désigné, la matière revient au titulaire."""
+        self.assertIn("Grammaire", self.sheets_for(self.titulaire_user))
+
+    def test_a_subject_with_its_own_teacher_leaves_the_titular(self):
+        """L'arabe est confié à un intervenant : il sort du lot du titulaire."""
+        self.assertNotIn("Arabe", self.sheets_for(self.titulaire_user))
+        self.assertEqual(self.sheets_for(self.arabe_user), {"Arabe"})
+
+    def test_a_teacher_sees_nothing_of_another_class(self):
+        self.assertNotIn("Histoire", self.sheets_for(self.titulaire_user))
+
+    def test_the_bulletin_names_the_titular_on_every_line(self):
+        """Les bulletins portent le nom de l'enseignant sur chaque ligne.
+
+        Sans la cascade, la colonne resterait vide dès qu'une matière n'a pas
+        d'intervenant propre — c'est-à-dire presque toujours.
+        """
+        with tenant_context(self.school):
+            make_student(self.school, self.room, "Awa", "Diop")
+            _results, subjects, _students = student_results(self.composition, self.room)
+            noms = {
+                link.effective_teacher.full_name if link.effective_teacher else None
+                for link in subjects
+            }
+        self.assertEqual(noms, {"Fatou Ndione", "Cheikh Sy"})
+
+    def test_a_class_without_a_titular_names_nobody_rather_than_guessing(self):
+        with tenant_context(self.school):
+            link = self.links["Histoire"]
+            self.assertIsNone(link.effective_teacher)

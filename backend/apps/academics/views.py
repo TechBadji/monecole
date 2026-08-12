@@ -41,7 +41,11 @@ class SubjectSerializer(serializers.ModelSerializer):
 class ClassSubjectSerializer(serializers.ModelSerializer):
     subject_name = serializers.CharField(source="subject.name", read_only=True)
     classroom_name = serializers.CharField(source="classroom.name", read_only=True)
-    teacher_name = serializers.CharField(source="teacher.full_name", read_only=True, default=None)
+    # `effective_teacher` et non `teacher` : la matière sans intervenant propre
+    # revient au titulaire de la classe, et l'écran doit le montrer.
+    teacher_name = serializers.CharField(
+        source="effective_teacher.full_name", read_only=True, default=None
+    )
 
     class Meta:
         model = ClassSubject
@@ -145,7 +149,7 @@ class ClassSubjectViewSet(TenantModelViewSet):
     serializer_class = ClassSubjectSerializer
     resource = "subject"
     model = ClassSubject
-    select_related = ("classroom", "subject", "teacher")
+    select_related = ("classroom", "classroom__teacher", "subject", "teacher")
     filterset_fields = ["classroom", "year", "teacher"]
 
 
@@ -433,7 +437,7 @@ class GradeEntryViewSet(TenantViewSetMixin, ViewSet):
         # cinquante-huit requêtes supplémentaires.
         sheets = GradeSheet.objects.select_related(
             "composition", "class_subject__subject", "class_subject__classroom",
-            "class_subject__teacher",
+            "class_subject__classroom__teacher", "class_subject__teacher",
         ).annotate(
             student_total=Count("grades", distinct=True),
             entered_total=Count(
@@ -446,8 +450,17 @@ class GradeEntryViewSet(TenantViewSetMixin, ViewSet):
             teacher = self._teacher_of(user)
             if teacher is None:
                 return sheets.none()
-            # L'enseignant ne voit que les matières qui lui sont attribuées.
-            return sheets.filter(class_subject__teacher=teacher)
+            # Le titulaire saisit **toutes** les matières de sa classe : c'est le
+            # fonctionnement de l'élémentaire, un maître par classe. La seule
+            # exception est la matière confiée à un intervenant — arabe, anglais
+            # — qui sort alors du lot du titulaire pour entrer dans le sien.
+            return sheets.filter(
+                Q(class_subject__teacher=teacher)
+                | Q(
+                    class_subject__teacher__isnull=True,
+                    class_subject__classroom__teacher=teacher,
+                )
+            )
         return sheets
 
     @action(detail=False, methods=["get"], url_path="classrooms")

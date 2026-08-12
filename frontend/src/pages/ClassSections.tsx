@@ -14,7 +14,11 @@ type ClassRoom = {
   id: number;
   name: string;
   student_count: number;
+  teacher: number | null;
+  teacher_name: string | null;
 };
+
+type Teacher = { id: number; full_name: string };
 
 const LEVEL_LABELS: Record<string, string> = {
   PRESCHOOL: "Préscolaire",
@@ -32,6 +36,8 @@ export default function ClassSections({ isAdmin }: { isAdmin: boolean }) {
   const { data: grades, reload } = useResource<Grade[]>("/classes/grades/");
   const { data: classes, reload: reloadClasses } =
     useResource<{ results: ClassRoom[] }>("/classes/?page_size=100");
+  const { data: teachers } =
+    useResource<{ results: Teacher[] }>("/teachers/?page_size=200");
 
   const [grade, setGrade] = useState("CI");
   const [count, setCount] = useState("2");
@@ -40,7 +46,6 @@ export default function ClassSections({ isAdmin }: { isAdmin: boolean }) {
   const [status, setStatus] = useState<{ kind: string; text: string } | null>(null);
 
   const selected = grades?.find((row) => row.code === grade);
-  const countById = new Map((classes?.results ?? []).map((c) => [c.name, c.student_count]));
 
   async function createSections() {
     setBusy(true);
@@ -58,6 +63,37 @@ export default function ClassSections({ isAdmin }: { isAdmin: boolean }) {
       setStatus({
         kind: "error",
         text: caught instanceof Error ? caught.message : "Création impossible.",
+      });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /**
+   * Désigne le titulaire d'une classe.
+   *
+   * Dans l'élémentaire, le maître tient toutes les matières de sa classe : le
+   * désigner ici évite de l'attribuer matière par matière — vingt-neuf fois
+   * pour un CE2.
+   */
+  async function assignTeacher(classroom: ClassRoom, teacherId: string) {
+    setBusy(true);
+    setStatus(null);
+    try {
+      await api.patch(`/classes/${classroom.id}/`, {
+        teacher: teacherId ? Number(teacherId) : null,
+      });
+      reloadClasses();
+      setStatus({
+        kind: "success",
+        text: teacherId
+          ? `Titulaire de « ${classroom.name} » enregistré.`
+          : `« ${classroom.name} » n'a plus de titulaire.`,
+      });
+    } catch (caught) {
+      setStatus({
+        kind: "error",
+        text: caught instanceof Error ? caught.message : "Enregistrement impossible.",
       });
     } finally {
       setBusy(false);
@@ -86,8 +122,9 @@ export default function ClassSections({ isAdmin }: { isAdmin: boolean }) {
     <div className="card">
       <div className="card-title">Classes et sections</div>
       <p className="muted" style={{ marginBottom: "var(--space-4)" }}>
-        Un niveau peut compter plusieurs classes. Elles sont nommées CI-A, CI-B,
-        CI-C, et se rangent d'elles-mêmes dans l'ordre pédagogique.
+        Un niveau peut compter plusieurs classes — CI-A, CI-B, CI-C — rangées
+        d'elles-mêmes dans l'ordre pédagogique. Le titulaire tient toutes les
+        matières de sa classe : c'est lui qui en saisit les notes.
       </p>
 
       {status && <div className={`alert ${status.kind}`}>{status.text}</div>}
@@ -146,40 +183,76 @@ export default function ClassSections({ isAdmin }: { isAdmin: boolean }) {
           <thead>
             <tr>
               <th>Niveau</th>
-              <th>Cycle</th>
-              <th>Classes</th>
+              <th>Classe</th>
+              <th className="num">Élèves</th>
+              <th>Titulaire</th>
+              {isAdmin && <th style={{ width: 60 }} />}
             </tr>
           </thead>
           <tbody>
-            {grades?.map((row) => (
-              <tr key={row.code}>
-                <td>
-                  <strong>{row.code}</strong>
-                  <span className="muted"> · {row.label}</span>
-                </td>
-                <td className="muted">{LEVEL_LABELS[row.level]}</td>
-                <td>
-                  {row.sections.length === 0 ? (
-                    <span className="muted">— aucune classe</span>
-                  ) : (
-                    <span className="section-chips">
-                      {row.sections.map((name) => {
-                        const students = countById.get(name) ?? 0;
-                        const classroom = classes?.results.find((c) => c.name === name);
-                        return (
-                          <span key={name} className="chip section-chip">
-                            {name}
+            {/* Une ligne par classe, et non par niveau : le titulaire est
+                propre à chaque classe, et CI-A n'a pas le même maître que
+                CI-B. */}
+            {grades?.flatMap((row) =>
+              row.sections.length === 0
+                ? [
+                    <tr key={row.code} className="muted">
+                      <td>
+                        <strong>{row.code}</strong>
+                        <span className="muted"> · {row.label}</span>
+                      </td>
+                      <td colSpan={isAdmin ? 4 : 3} className="muted">
+                        — aucune classe créée
+                      </td>
+                    </tr>,
+                  ]
+                : row.sections.map((name, index) => {
+                    const classroom = classes?.results.find((c) => c.name === name);
+                    const students = classroom?.student_count ?? 0;
+                    return (
+                      <tr key={name}>
+                        <td>
+                          {/* Le niveau n'est répété qu'une fois : le rappeler à
+                              chaque section brouille la lecture verticale. */}
+                          {index === 0 ? (
+                            <>
+                              <strong>{row.code}</strong>
+                              <span className="muted"> · {row.label}</span>
+                            </>
+                          ) : (
+                            <span className="muted">↳</span>
+                          )}
+                        </td>
+                        <td>
+                          <strong>{name}</strong>
+                        </td>
+                        <td className="num">{students}</td>
+                        <td>
+                          {isAdmin && classroom ? (
+                            <select
+                              value={classroom.teacher ?? ""}
+                              disabled={busy}
+                              aria-label={`Titulaire de ${name}`}
+                              onChange={(event) =>
+                                assignTeacher(classroom, event.target.value)
+                              }
+                            >
+                              <option value="">— non attribué —</option>
+                              {teachers?.results.map((teacher) => (
+                                <option key={teacher.id} value={teacher.id}>
+                                  {teacher.full_name}
+                                </option>
+                              ))}
+                            </select>
+                          ) : (
                             <span className="muted">
-                              {" · "}
-                              {students} élève{students > 1 ? "s" : ""}
+                              {classroom?.teacher_name ?? "— non attribué —"}
                             </span>
-                            {/* La suppression tient sur la pastille : en colonne
-                                séparée, elle sortait du cadre sur un écran de
-                                1 400 px et n'était atteignable qu'en faisant
-                                défiler le tableau. Seules les classes vides
-                                l'offrent — le serveur refuse les autres, autant
-                                ne pas proposer le geste. */}
-                            {isAdmin && students === 0 && classroom && (
+                          )}
+                        </td>
+                        {isAdmin && (
+                          <td>
+                            {students === 0 && classroom && (
                               <button
                                 type="button"
                                 className="chip-remove"
@@ -191,14 +264,12 @@ export default function ClassSections({ isAdmin }: { isAdmin: boolean }) {
                                 ×
                               </button>
                             )}
-                          </span>
-                        );
-                      })}
-                    </span>
-                  )}
-                </td>
-              </tr>
-            ))}
+                          </td>
+                        )}
+                      </tr>
+                    );
+                  }),
+            )}
           </tbody>
         </table>
       </div>

@@ -176,7 +176,7 @@ class ClassRoomViewSet(TenantModelViewSet):
         # `order_by` explicite : le GROUP BY introduit par `annotate` fait perdre
         # l'ordre implicite du Meta, et une pagination non ordonnée renvoie des
         # doublons d'une page à l'autre.
-        return ClassRoom.objects.annotate(
+        return ClassRoom.objects.select_related("teacher").annotate(
             student_count=Count("students", filter=Q(students__status=StudentStatus.ACTIVE))
         ).order_by("order", "name")
 

@@ -73,7 +73,10 @@ class ClassSubject(TenantScopedModel):
         null=True,
         blank=True,
         related_name="class_subjects",
-        help_text="Enseignant autorisé à saisir les notes de cette matière.",
+        help_text=(
+            "Intervenant propre à cette matière — arabe, anglais. Vide, c'est le "
+            "titulaire de la classe qui saisit."
+        ),
     )
     order = models.PositiveSmallIntegerField("rang", default=0)
 
@@ -90,6 +93,17 @@ class ClassSubject(TenantScopedModel):
 
     def __str__(self):
         return f"{self.classroom} — {self.subject} (sur {self.max_score})"
+
+    @property
+    def effective_teacher(self):
+        """Qui enseigne réellement cette matière.
+
+        L'intervenant s'il y en a un, sinon le titulaire de la classe. Les
+        bulletins de l'école portent le nom de l'enseignant sur **chaque
+        ligne** : sans cette cascade, la colonne resterait vide dès lors que la
+        matière n'a pas d'intervenant propre — c'est-à-dire presque toujours.
+        """
+        return self.teacher or self.classroom.teacher
 
 
 class Composition(TenantScopedModel):

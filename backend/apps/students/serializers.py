@@ -14,10 +14,16 @@ from .models import (
 
 class ClassRoomSerializer(serializers.ModelSerializer):
     student_count = serializers.IntegerField(read_only=True)
+    teacher_name = serializers.CharField(
+        source="teacher.full_name", read_only=True, default=None
+    )
 
     class Meta:
         model = ClassRoom
-        fields = ["id", "name", "level", "order", "capacity", "student_count"]
+        fields = [
+            "id", "name", "level", "order", "capacity", "student_count",
+            "teacher", "teacher_name",
+        ]
 
 
 class FamilySerializer(serializers.ModelSerializer):
