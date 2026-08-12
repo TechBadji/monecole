@@ -2,12 +2,14 @@ import { api, money } from "../api";
 import { useAuth } from "../auth";
 import { abbreviateMonth } from "../components/charts";
 import { useResource } from "../hooks";
+import { useYearParam } from "../year";
 import type { Bilan as BilanData, Series } from "../types";
 
 export default function Bilan() {
+  const yearParam = useYearParam();
   const { profile } = useAuth();
   const currency = profile?.school?.currency ?? "XOF";
-  const { data, error, loading } = useResource<BilanData>("/reports/bilan/");
+  const { data, error, loading } = useResource<BilanData>(`/reports/bilan/${yearParam}`);
 
   if (loading) return <div className="spinner">Chargement…</div>;
   if (error) return <div className="alert error">{error}</div>;

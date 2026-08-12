@@ -4,12 +4,13 @@ import { money } from "../api";
 import { useAuth } from "../auth";
 import { StaleBanner } from "../components/OfflineBanners";
 import { mutate, useOfflineResource } from "../offline/useOfflineResource";
+import { useYear } from "../year";
 import type { ClassRoom, Paginated, Register, RegisterRow, SchoolYear } from "../types";
 
 type Draft = Record<number, RegisterRow>;
 
 /** Fins de mois de l'exercice, d'octobre à septembre. */
-function periodOptions(year: SchoolYear | undefined) {
+function periodOptions(year: SchoolYear | null | undefined) {
   if (!year) return [];
   const start = new Date(year.start_date);
   return Array.from({ length: 12 }, (_, index) => {
@@ -31,7 +32,6 @@ export default function PaymentRegister() {
   const editable = can("monthlypayment", "add");
 
   const classes = useOfflineResource<Paginated<ClassRoom>>("/classes/");
-  const years = useOfflineResource<Paginated<SchoolYear>>("/school-years/");
 
   const [classroom, setClassroom] = useState<number | null>(null);
   const [period, setPeriod] = useState<string>("");
@@ -41,7 +41,10 @@ export default function PaymentRegister() {
   >(null);
   const [saving, setSaving] = useState(false);
 
-  const currentYear = years.data?.results.find((year) => year.is_current);
+  // Le sélecteur global commande : l'écran de saisie doit viser la même
+  // année que le reste de l'application, faute de quoi un encaissement
+  // partirait dans l'année courante pendant qu'on consulte 2024.
+  const { selected: currentYear } = useYear();
   const periods = useMemo(() => periodOptions(currentYear), [currentYear]);
 
   useEffect(() => {

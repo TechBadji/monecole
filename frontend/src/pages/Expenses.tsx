@@ -3,7 +3,8 @@ import { useState, type FormEvent } from "react";
 import { api, money } from "../api";
 import { useAuth } from "../auth";
 import { useResource } from "../hooks";
-import type { Expense, ExpenseCategory, Paginated, SchoolYear } from "../types";
+import { useYear } from "../year";
+import type { Expense, ExpenseCategory, Paginated } from "../types";
 
 const STATUS_LABELS: Record<string, string> = {
   DRAFT: "Brouillon",
@@ -27,12 +28,13 @@ export default function Expenses() {
   const { data: categories } = useResource<Paginated<ExpenseCategory>>(
     "/expense-categories/?page_size=100",
   );
-  const { data: years } = useResource<Paginated<SchoolYear>>("/school-years/");
   const { data, error, loading, reload } = useResource<Paginated<Expense>>(
     "/expenses/?page_size=100",
   );
 
-  const currentYear = years?.results.find((year) => year.is_current);
+  // L'année vient du sélecteur global : la résoudre ici ferait saisir dans
+  // l'année courante quelqu'un qui consulte une année close.
+  const { selected: currentYear } = useYear();
   const [form, setForm] = useState({
     operation_date: new Date().toISOString().slice(0, 10),
     label: "",

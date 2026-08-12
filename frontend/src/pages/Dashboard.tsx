@@ -3,12 +3,14 @@ import { useAuth } from "../auth";
 import { BarChart, LineChart, abbreviateMonth } from "../components/charts";
 import { StaleBanner } from "../components/OfflineBanners";
 import { useOfflineResource } from "../offline/useOfflineResource";
+import { useYearParam } from "../year";
 import type { Dashboard as DashboardData } from "../types";
 
 export default function Dashboard() {
+  const yearParam = useYearParam();
   const { profile } = useAuth();
   const { data, error, loading, stale, cachedAt } =
-    useOfflineResource<DashboardData>("/reports/dashboard/");
+    useOfflineResource<DashboardData>(`/reports/dashboard/${yearParam}`);
   const currency = profile?.school?.currency ?? "XOF";
 
   if (loading) return <div className="spinner">Chargement…</div>;

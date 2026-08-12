@@ -3,7 +3,8 @@ import { useState, type FormEvent } from "react";
 import { api } from "../api";
 import { useAuth } from "../auth";
 import { useResource } from "../hooks";
-import type { Paginated, SchoolYear } from "../types";
+import { useYear } from "../year";
+import type { Paginated } from "../types";
 
 type Composition = {
   id: number;
@@ -44,8 +45,9 @@ export default function Compositions() {
   const { profile } = useAuth();
   const isAdmin = profile?.role === "ADMIN";
 
-  const { data: years } = useResource<Paginated<SchoolYear>>("/school-years/");
-  const currentYear = years?.results.find((year) => year.is_current);
+  // L'année vient du sélecteur global : la résoudre ici ferait saisir dans
+  // l'année courante quelqu'un qui consulte une année close.
+  const { selected: currentYear } = useYear();
   const { data, reload } = useResource<Paginated<Composition>>("/compositions/");
 
   const [selected, setSelected] = useState<number | null>(null);

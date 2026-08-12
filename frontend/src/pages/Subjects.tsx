@@ -3,7 +3,8 @@ import { useEffect, useState } from "react";
 import { api } from "../api";
 import { useAuth } from "../auth";
 import { useResource } from "../hooks";
-import type { ClassRoom, Paginated, SchoolYear } from "../types";
+import { useYear } from "../year";
+import type { ClassRoom, Paginated } from "../types";
 
 type Subject = {
   id: number;
@@ -44,8 +45,9 @@ export default function Subjects() {
     useResource<Paginated<Subject>>("/subjects/?page_size=100");
   const { data: classes } = useResource<Paginated<ClassRoom>>("/classes/");
   const { data: teachers } = useResource<Paginated<Teacher>>("/teachers/?page_size=100");
-  const { data: years } = useResource<Paginated<SchoolYear>>("/school-years/");
-  const currentYear = years?.results.find((year) => year.is_current);
+  // L'année vient du sélecteur global : la résoudre ici ferait saisir dans
+  // l'année courante quelqu'un qui consulte une année close.
+  const { selected: currentYear } = useYear();
 
   const [classroom, setClassroom] = useState<number | null>(null);
   const [rows, setRows] = useState<Row[]>([]);

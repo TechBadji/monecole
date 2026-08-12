@@ -3,6 +3,7 @@ import { useState } from "react";
 import { api, money } from "../api";
 import { useAuth } from "../auth";
 import { useResource } from "../hooks";
+import { useYear } from "../year";
 import type { Paginated, SchoolYear } from "../types";
 
 type Payslip = {
@@ -29,7 +30,7 @@ type Scale = {
   validated_by: string;
 };
 
-function monthOptions(year: SchoolYear | undefined) {
+function monthOptions(year: SchoolYear | null | undefined) {
   if (!year) return [];
   const start = new Date(year.start_date);
   return Array.from({ length: 12 }, (_, index) => {
@@ -48,9 +49,10 @@ export default function Payroll() {
   const { profile } = useAuth();
   const currency = profile?.school?.currency ?? "XOF";
 
-  const { data: years } = useResource<Paginated<SchoolYear>>("/school-years/");
   const { data: scales } = useResource<Paginated<Scale>>("/payroll-scales/");
-  const currentYear = years?.results.find((year) => year.is_current);
+  // L'année vient du sélecteur global : la résoudre ici ferait saisir dans
+  // l'année courante quelqu'un qui consulte une année close.
+  const { selected: currentYear } = useYear();
   const periods = monthOptions(currentYear);
 
   const [period, setPeriod] = useState("");

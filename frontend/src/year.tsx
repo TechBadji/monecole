@@ -66,6 +66,19 @@ export function YearProvider({ children }: { children: ReactNode }) {
   );
 }
 
+/**
+ * Paramètre `year` à joindre aux appels, ou chaîne vide.
+ *
+ * Vide tant que les années ne sont pas chargées : sans cela, le premier appel
+ * partirait avec `year=undefined` et le serveur retomberait sur l'année
+ * courante — donnant l'illusion que le sélecteur fonctionne alors qu'il ne
+ * ferait rien au premier rendu.
+ */
+export function useYearParam(separator: "?" | "&" = "?") {
+  const { selected } = useYear();
+  return selected ? `${separator}year=${selected.id}` : "";
+}
+
 export function useYear() {
   const context = useContext(YearContext);
   if (!context) throw new Error("useYear doit être utilisé dans un YearProvider.");

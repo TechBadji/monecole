@@ -1,12 +1,14 @@
 import { money } from "../api";
 import { useAuth } from "../auth";
 import { useResource } from "../hooks";
+import { useYearParam } from "../year";
 import type { Arrears as ArrearsData } from "../types";
 
 export default function Arrears() {
+  const yearParam = useYearParam();
   const { profile } = useAuth();
   const currency = profile?.school?.currency ?? "XOF";
-  const { data, error, loading } = useResource<ArrearsData>("/monthly-payments/arrears/");
+  const { data, error, loading } = useResource<ArrearsData>(`/monthly-payments/arrears/${yearParam}`);
 
   if (loading) return <div className="spinner">Chargement…</div>;
   if (error) return <div className="alert error">{error}</div>;
