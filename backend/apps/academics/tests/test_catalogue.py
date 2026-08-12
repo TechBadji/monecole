@@ -18,6 +18,7 @@ from apps.academics.catalogue import (
     subject_code,
 )
 from apps.academics.models import ClassSubject, Composition, Grade, GradeSheet, Subject
+from apps.students.models import ClassTeacher
 from apps.academics.services import student_results
 from apps.core.models import Role
 from apps.core.tenancy import tenant_context
@@ -367,14 +368,18 @@ class ClassTeacherTests(TestCase):
                 email="arabe@test.sn",
             )
             cls.room = make_classroom(cls.school, "CE2-A", order=70)
-            cls.room.teacher = cls.titulaire
-            cls.room.save()
             cls.autre = make_classroom(cls.school, "CM1-A", order=80)
 
             cls.composition = Composition.objects.create(
                 school=cls.school, year=cls.year, name="1er contrôle",
                 kind=Composition.Kind.TERM, term=1, date=cls.year.start_date,
                 status=Composition.Status.OPEN,
+            )
+
+            # Le titulaire s'affecte pour une année, non pour toujours.
+            ClassTeacher.objects.create(
+                school=cls.school, classroom=cls.room, year=cls.year,
+                teacher=cls.titulaire,
             )
 
             cls.links = {}

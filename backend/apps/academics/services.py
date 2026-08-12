@@ -37,7 +37,8 @@ def student_results(composition, classroom):
 
     subjects = list(
         ClassSubject.objects.filter(classroom=classroom, year=composition.year)
-        .select_related("subject", "teacher", "classroom__teacher")
+        .select_related("subject", "teacher", "classroom")
+        .prefetch_related("classroom__teachers__teacher")
         .order_by("order", "subject__order")
     )
     sheets = {

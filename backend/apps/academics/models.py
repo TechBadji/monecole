@@ -103,7 +103,7 @@ class ClassSubject(TenantScopedModel):
         ligne** : sans cette cascade, la colonne resterait vide dès lors que la
         matière n'a pas d'intervenant propre — c'est-à-dire presque toujours.
         """
-        return self.teacher or self.classroom.teacher
+        return self.teacher or self.classroom.teacher_for(self.year)
 
 
 class Composition(TenantScopedModel):

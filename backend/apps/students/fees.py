@@ -60,13 +60,32 @@ def discounts_for(student, year):
     return list(Discount.objects.filter(year=year).filter(query))
 
 
-def due_for(student, year, *, schedule=None, discounts=None):
+def pending_students(year):
+    """Élèves dont l'inscription de l'année n'est pas encore confirmée.
+
+    Ils apparaissent au secrétariat, qui doit les relancer, mais rien ne leur
+    est réclamé : leur porter des mensualités gonflerait les arriérés dès
+    octobre sur des élèves dont on ignore s'ils reviendront.
+    """
+    from .models import Enrollment, EnrollmentStatus
+
+    return set(
+        Enrollment.objects.filter(
+            year=year, status=EnrollmentStatus.PENDING
+        ).values_list("student_id", flat=True)
+    )
+
+
+def due_for(student, year, *, schedule=None, discounts=None, pending=False):
     """Montants dus par un élève, réductions appliquées.
 
-    Retourne `None` si la classe n'a pas de grille tarifaire : le montant dû est
-    alors indéterminable, et le signaler vaut mieux que de retourner zéro — un
-    zéro se lirait comme « à jour ».
+    Retourne `None` si la classe n'a pas de grille tarifaire, ou si
+    l'inscription de l'année est encore en attente : le montant dû est alors
+    indéterminable, et le signaler vaut mieux que de retourner zéro — un zéro
+    se lirait comme « à jour ».
     """
+    if pending:
+        return None
     if schedule is None:
         schedule = FeeSchedule.objects.filter(
             classroom=student.classroom_id, year=year
@@ -106,6 +125,9 @@ def due_map(year, students):
     afficher ses arriérés.
     """
     schedules = {s.classroom_id: s for s in FeeSchedule.objects.filter(year=year)}
+    # Une requête pour l'ensemble : interroger l'inscription élève par élève
+    # ramènerait le millier de requêtes que cette fonction existe pour éviter.
+    pending = pending_students(year)
 
     by_student = {}
     by_family = {}
@@ -123,5 +145,6 @@ def due_map(year, students):
             year,
             schedule=schedules.get(student.classroom_id),
             discounts=applicable,
+            pending=student.id in pending,
         )
     return result

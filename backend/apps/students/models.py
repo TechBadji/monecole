@@ -23,6 +23,10 @@ class ClassRoom(TenantScopedModel):
     Madame NDIONE sur les dix-neuf matières du CM2, Madame DIENG sur celles du
     CP.
 
+    Le titulaire n'est pas porté ici mais par `ClassTeacher` : **il change d'une
+    année à l'autre**, alors que la classe « CI-A » traverse les années. Le
+    poser sur la classe aurait réécrit l'histoire à chaque rentrée.
+
     `ClassSubject.teacher` reste disponible pour l'exception : un intervenant
     d'arabe ou d'anglais, courant dans les écoles franco-arabes, qui ne prend
     qu'une matière. Vide, il vaut « le titulaire de la classe ».
@@ -30,15 +34,6 @@ class ClassRoom(TenantScopedModel):
 
     name = models.CharField("nom", max_length=30)
     level = models.CharField("cycle", max_length=20, choices=Level.choices)
-    teacher = models.ForeignKey(
-        "staff.Teacher",
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name="classrooms",
-        verbose_name="titulaire",
-        help_text="Enseignant de la classe. Il saisit les notes de toutes ses matières.",
-    )
     order = models.PositiveSmallIntegerField(
         "rang", default=0, help_text="Ordre d'affichage, de la garderie au CM2."
     )
@@ -53,6 +48,43 @@ class ClassRoom(TenantScopedModel):
 
     def __str__(self):
         return self.name
+
+    def teacher_for(self, year):
+        """Titulaire de la classe pour une année donnée, ou `None`."""
+        link = self.teachers.filter(year=year).select_related("teacher").first()
+        return link.teacher if link else None
+
+
+class ClassTeacher(TenantScopedModel):
+    """Titulaire d'une classe, pour une année scolaire.
+
+    Séparé de `ClassRoom` parce que l'affectation est **annuelle** : la même
+    classe « CI-A » change de maître d'une rentrée à l'autre, et un bulletin de
+    2024 doit continuer de porter le nom de l'enseignant de 2024. Un champ sur
+    la classe aurait réécrit tous les bulletins passés au premier changement
+    d'affectation.
+    """
+
+    classroom = models.ForeignKey(
+        ClassRoom, on_delete=models.CASCADE, related_name="teachers"
+    )
+    year = models.ForeignKey(SchoolYear, on_delete=models.CASCADE, related_name="class_teachers")
+    teacher = models.ForeignKey(
+        "staff.Teacher", on_delete=models.CASCADE, related_name="classrooms"
+    )
+
+    class Meta:
+        verbose_name = "titulaire de classe"
+        verbose_name_plural = "titulaires de classe"
+        ordering = ["classroom__order"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["classroom", "year"], name="one_teacher_per_class_and_year"
+            )
+        ]
+
+    def __str__(self):
+        return f"{self.classroom} — {self.teacher} ({self.year})"
 
 
 class Family(TenantScopedModel):
@@ -312,11 +344,24 @@ class FeeSchedule(TenantScopedModel):
         return f"{self.classroom} — {self.year}"
 
 
+class EnrollmentStatus(models.TextChoices):
+    PENDING = "PENDING", "En attente"
+    CONFIRMED = "CONFIRMED", "Confirmée"
+    WITHDRAWN = "WITHDRAWN", "Retirée"
+
+
 class Enrollment(TenantScopedModel):
     """Inscription d'un élève pour une année scolaire.
 
     Reprend le bloc « TOTAL INSCRIPTION » des onglets de classe (colonnes H à L) :
     inscription payée, montant, uniforme, assurance, APE.
+
+    **Une inscription en attente n'est pas une inscription.** À l'ouverture
+    d'une année, les élèves passés en classe supérieure y arrivent en attente :
+    ils apparaissent au secrétariat, qui doit les relancer, mais aucune
+    mensualité ne leur est réclamée tant que l'inscription n'est pas confirmée.
+    Les compter d'emblée gonflerait les arriérés dès octobre, sur des élèves
+    dont on ignore encore s'ils reviendront.
     """
 
     student = models.ForeignKey(Student, on_delete=models.CASCADE, related_name="enrollments")
@@ -327,13 +372,34 @@ class Enrollment(TenantScopedModel):
         related_name="enrollments",
         help_text="Classe à l'inscription — l'élève peut changer de classe ensuite.",
     )
+    status = models.CharField(
+        "état",
+        max_length=20,
+        choices=EnrollmentStatus.choices,
+        default=EnrollmentStatus.CONFIRMED,
+        help_text="En attente tant que la réinscription n'est pas confirmée.",
+    )
     registration_paid = models.BooleanField("inscription réglée", default=False)
     registration_amount = models.PositiveIntegerField("montant inscription", **MONEY)
     uniform_amount = models.PositiveIntegerField("uniforme", **MONEY)
     insurance_amount = models.PositiveIntegerField("assurance", **MONEY)
     ape_amount = models.PositiveIntegerField("APE", **MONEY)
     paid_at = models.DateField("date de règlement", null=True, blank=True)
+    confirmed_at = models.DateField("date de confirmation", null=True, blank=True)
+    promoted_from = models.ForeignKey(
+        ClassRoom,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="+",
+        help_text="Classe de l'année précédente, quand l'inscription vient d'un passage.",
+    )
+    is_repeat = models.BooleanField("redoublement", default=False)
     created_at = models.DateTimeField(auto_now_add=True)
+
+    @property
+    def is_pending(self):
+        return self.status == EnrollmentStatus.PENDING
 
     class Meta:
         verbose_name = "inscription"

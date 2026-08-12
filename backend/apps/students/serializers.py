@@ -14,9 +14,11 @@ from .models import (
 
 class ClassRoomSerializer(serializers.ModelSerializer):
     student_count = serializers.IntegerField(read_only=True)
-    teacher_name = serializers.CharField(
-        source="teacher.full_name", read_only=True, default=None
-    )
+    # Le titulaire dépend de l'année : il est résolu par le jeu de requêtes, non
+    # porté par la classe. Lecture seule ici ; l'affectation passe par
+    # `PUT /api/classes/<id>/teacher/`, qui exige une année.
+    teacher = serializers.SerializerMethodField()
+    teacher_name = serializers.SerializerMethodField()
 
     class Meta:
         model = ClassRoom
@@ -24,6 +26,19 @@ class ClassRoomSerializer(serializers.ModelSerializer):
             "id", "name", "level", "order", "capacity", "student_count",
             "teacher", "teacher_name",
         ]
+
+    def _link(self, obj):
+        for link in getattr(obj, "year_teachers", []):
+            return link
+        return None
+
+    def get_teacher(self, obj):
+        link = self._link(obj)
+        return link.teacher_id if link else None
+
+    def get_teacher_name(self, obj):
+        link = self._link(obj)
+        return link.teacher.full_name if link else None
 
 
 class FamilySerializer(serializers.ModelSerializer):
@@ -88,8 +103,9 @@ class EnrollmentSerializer(serializers.ModelSerializer):
         model = Enrollment
         fields = [
             "id", "student", "student_name", "year", "classroom", "classroom_name",
-            "registration_paid", "registration_amount", "uniform_amount",
-            "insurance_amount", "ape_amount", "paid_at", "total_received", "created_at",
+            "status", "registration_paid", "registration_amount", "uniform_amount",
+            "insurance_amount", "ape_amount", "paid_at", "confirmed_at",
+            "promoted_from", "is_repeat", "total_received", "created_at",
         ]
 
     def validate(self, attrs):

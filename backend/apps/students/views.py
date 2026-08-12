@@ -1,5 +1,5 @@
 from django.db import transaction
-from django.db.models import Count, Q, Sum
+from django.db.models import Count, Prefetch, Q, Sum
 from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.response import Response
@@ -11,6 +11,7 @@ from apps.core.views_base import TenantModelViewSet
 from .models import (
     ClassEnrollmentHistory,
     ClassRoom,
+    ClassTeacher,
     Discount,
     Enrollment,
     Family,
@@ -58,6 +59,117 @@ class ClassRoomViewSet(TenantModelViewSet):
                 }
             )
         return super().destroy(request, *args, **kwargs)
+
+    @action(detail=False, methods=["get", "post"], url_path="promotion")
+    def promotion(self, request):
+        """Passage des élèves d'une année à la suivante.
+
+        `GET` calcule sans rien écrire : un passage touche tous les élèves de
+        l'établissement, et l'administration doit voir ce qu'il ferait avant de
+        s'y engager. `POST` applique.
+        """
+        from apps.core.models import SchoolYear
+
+        from .promotion import apply_promotion, plan_promotion
+
+        if request.user.role != Role.ADMIN:
+            raise PermissionDenied("Seul un administrateur ouvre une année scolaire.")
+
+        source = request.query_params.get("from") or request.data.get("from")
+        target = request.query_params.get("to") or request.data.get("to")
+        from_year = SchoolYear.objects.filter(pk=source).first()
+        to_year = SchoolYear.objects.filter(pk=target).first()
+        if from_year is None or to_year is None:
+            raise ValidationError(
+                {"detail": "Indiquez l'année d'origine et l'année d'arrivée."}
+            )
+        if from_year.pk == to_year.pk:
+            raise ValidationError({"detail": "Les deux années doivent différer."})
+
+        repeating = request.data.get("repeating") or request.query_params.getlist("repeating")
+        repeating = [int(value) for value in repeating] if repeating else []
+
+        if request.method == "GET":
+            plan = plan_promotion(from_year, to_year, repeating)
+            return Response(
+                {
+                    **plan.summary,
+                    "moves": [
+                        {
+                            "student": s.id, "name": s.full_name,
+                            "matricule": s.matricule,
+                            "from": origin.name, "to": target_room.name,
+                        }
+                        for s, origin, target_room in plan.moves
+                    ],
+                    "blocked": [
+                        {
+                            "student": s.id, "name": s.full_name,
+                            "classroom": s.classroom.name,
+                        }
+                        for s in plan.blocked
+                    ],
+                }
+            )
+
+        plan, created, carried = apply_promotion(
+            from_year, to_year, repeating, school=request.user.school
+        )
+        return Response(
+            {
+                **plan.summary,
+                "created": created,
+                "teachers_carried": carried,
+                "detail": (
+                    f"{created} inscription(s) créée(s) en attente pour "
+                    f"{to_year.label}. Elles ne génèrent aucune mensualité "
+                    "tant qu'elles ne sont pas confirmées."
+                ),
+            },
+            status=201,
+        )
+
+    @action(detail=True, methods=["put"], url_path="teacher")
+    def assign_teacher(self, request, pk=None):
+        """Désigne le titulaire d'une classe **pour une année**.
+
+        L'affectation n'a pas de sens sans année : reconduire un maître d'une
+        rentrée à l'autre est un choix, pas un automatisme, et un bulletin de
+        2024 doit continuer de porter le nom de l'enseignant de 2024.
+        """
+        from apps.core.models import SchoolYear
+        from apps.staff.models import Teacher
+
+        if request.user.role != Role.ADMIN:
+            raise PermissionDenied("Seul un administrateur affecte les enseignants.")
+
+        classroom = self.get_object()
+        year_id = request.data.get("year")
+        year = (
+            SchoolYear.objects.filter(pk=year_id).first()
+            if year_id
+            else SchoolYear.objects.filter(is_current=True).first()
+        )
+        if year is None:
+            raise ValidationError({"year": "Année scolaire introuvable."})
+
+        teacher_id = request.data.get("teacher")
+        if not teacher_id:
+            ClassTeacher.objects.filter(classroom=classroom, year=year).delete()
+            return Response({"teacher": None, "teacher_name": None, "year": year.id})
+
+        teacher = Teacher.objects.filter(pk=teacher_id, is_active=True).first()
+        if teacher is None:
+            raise ValidationError({"teacher": "Enseignant introuvable ou inactif."})
+
+        link, _ = ClassTeacher.objects.update_or_create(
+            classroom=classroom,
+            year=year,
+            defaults={"school": request.user.school, "teacher": teacher},
+        )
+        return Response(
+            {"teacher": teacher.id, "teacher_name": teacher.full_name, "year": year.id}
+        )
 
     @action(detail=False, methods=["get"], url_path="grades")
     def grades(self, request):
@@ -176,7 +288,18 @@ class ClassRoomViewSet(TenantModelViewSet):
         # `order_by` explicite : le GROUP BY introduit par `annotate` fait perdre
         # l'ordre implicite du Meta, et une pagination non ordonnée renvoie des
         # doublons d'une page à l'autre.
-        return ClassRoom.objects.select_related("teacher").annotate(
+        # Le titulaire de l'année courante, préchargé : sans cela, la liste des
+        # classes déclenche une requête par ligne pour l'afficher.
+        from apps.core.models import SchoolYear
+
+        year = SchoolYear.objects.filter(is_current=True).first()
+        return ClassRoom.objects.prefetch_related(
+            Prefetch(
+                "teachers",
+                queryset=ClassTeacher.objects.filter(year=year).select_related("teacher"),
+                to_attr="year_teachers",
+            )
+        ).annotate(
             student_count=Count("students", filter=Q(students__status=StudentStatus.ACTIVE))
         ).order_by("order", "name")
 
@@ -380,8 +503,25 @@ class EnrollmentViewSet(AuditedModelViewSetMixin, TenantModelViewSet):
     resource = "enrollment"
     model = Enrollment
     select_related = ("student", "classroom", "year")
-    filterset_fields = ["year", "classroom", "registration_paid"]
+    filterset_fields = ["year", "classroom", "registration_paid", "status"]
     search_fields = ["student__first_name", "student__last_name"]
+
+    @action(detail=True, methods=["post"], url_path="confirm")
+    def confirm(self, request, pk=None):
+        """Confirme une inscription en attente.
+
+        C'est ce geste, et lui seul, qui fait entrer l'élève dans l'année : à
+        partir de là, ses mensualités lui sont dues et il compte dans les
+        effectifs.
+        """
+        from .promotion import confirm_enrollment
+
+        enrollment = self.get_object()
+        paid = request.data.get("registration_paid")
+        confirm_enrollment(
+            enrollment, paid=None if paid is None else bool(paid)
+        )
+        return Response(EnrollmentSerializer(enrollment).data)
 
 
 class MonthlyPaymentViewSet(AuditedModelViewSetMixin, TenantModelViewSet):

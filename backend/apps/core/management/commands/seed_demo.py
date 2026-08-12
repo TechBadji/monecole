@@ -36,6 +36,7 @@ from apps.attendance.models import AttendanceEvent, AttendanceSettings
 from apps.students.models import (
     Discount,
     ClassRoom,
+    ClassTeacher,
     Enrollment,
     Family,
     FeeSchedule,
@@ -478,8 +479,10 @@ class Command(BaseCommand):
         # produirait des bulletins où chaque ligne porte un nom distinct — ce
         # qu'aucune école primaire ne connaît.
         for index, classroom in enumerate(classrooms):
-            classroom.teacher = teachers[index % len(teachers)]
-            classroom.save(update_fields=["teacher"])
+            ClassTeacher.objects.create(
+                school=school, classroom=classroom, year=year,
+                teacher=teachers[index % len(teachers)],
+            )
 
         # Seul l'élémentaire est noté : le préscolaire ne compose pas.
         primary = [c for c in classrooms if c.level == Level.PRIMARY]

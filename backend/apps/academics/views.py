@@ -1,7 +1,7 @@
 """Matières, compositions, saisie des notes et bulletins."""
 
 from django.db import transaction
-from django.db.models import Count, Q
+from django.db.models import Count, F, Q
 from django.utils import timezone
 from rest_framework import serializers
 from rest_framework.decorators import action
@@ -149,7 +149,7 @@ class ClassSubjectViewSet(TenantModelViewSet):
     serializer_class = ClassSubjectSerializer
     resource = "subject"
     model = ClassSubject
-    select_related = ("classroom", "classroom__teacher", "subject", "teacher")
+    select_related = ("classroom", "subject", "teacher")
     filterset_fields = ["classroom", "year", "teacher"]
 
 
@@ -437,7 +437,7 @@ class GradeEntryViewSet(TenantViewSetMixin, ViewSet):
         # cinquante-huit requêtes supplémentaires.
         sheets = GradeSheet.objects.select_related(
             "composition", "class_subject__subject", "class_subject__classroom",
-            "class_subject__classroom__teacher", "class_subject__teacher",
+            "class_subject__teacher",
         ).annotate(
             student_total=Count("grades", distinct=True),
             entered_total=Count(
@@ -454,13 +454,18 @@ class GradeEntryViewSet(TenantViewSetMixin, ViewSet):
             # fonctionnement de l'élémentaire, un maître par classe. La seule
             # exception est la matière confiée à un intervenant — arabe, anglais
             # — qui sort alors du lot du titulaire pour entrer dans le sien.
+            # Le titulaire est rattaché au couple (classe, année) : le lien se
+            # fait donc sur `classroom__teachers`, en exigeant que l'année de
+            # l'affectation soit celle de la matière. Sans cette égalité, le
+            # maître de 2024 verrait les feuilles de 2026.
             return sheets.filter(
                 Q(class_subject__teacher=teacher)
                 | Q(
                     class_subject__teacher__isnull=True,
-                    class_subject__classroom__teacher=teacher,
+                    class_subject__classroom__teachers__teacher=teacher,
+                    class_subject__classroom__teachers__year=F("class_subject__year"),
                 )
-            )
+            ).distinct()
         return sheets
 
     @action(detail=False, methods=["get"], url_path="classrooms")
