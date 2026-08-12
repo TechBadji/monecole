@@ -450,12 +450,45 @@ class GradeEntryViewSet(TenantViewSetMixin, ViewSet):
             return sheets.filter(class_subject__teacher=teacher)
         return sheets
 
+    @action(detail=False, methods=["get"], url_path="classrooms")
+    def classrooms(self, request):
+        """Classes ayant des feuilles pour une composition donnée.
+
+        Le sélecteur ne doit proposer que des classes où il y a quelque chose à
+        saisir : offrir une classe sans feuille mène à un écran vide, et
+        l'utilisateur croit à une panne.
+        """
+        sheets = self._accessible_sheets(request.user)
+        composition = request.query_params.get("composition")
+        if composition:
+            sheets = sheets.filter(composition_id=composition)
+
+        seen = {}
+        for sheet in sheets.order_by(
+            "class_subject__classroom__order", "class_subject__classroom__name"
+        ):
+            classroom = sheet.class_subject.classroom
+            entry = seen.setdefault(
+                classroom.id,
+                {"id": classroom.id, "name": classroom.name, "sheets": 0, "validated": 0},
+            )
+            entry["sheets"] += 1
+            entry["validated"] += int(sheet.is_validated)
+        return Response(list(seen.values()))
+
     def list(self, request):
         """Feuilles de notes accessibles à l'utilisateur."""
         composition = request.query_params.get("composition")
+        classroom = request.query_params.get("classroom")
         sheets = self._accessible_sheets(request.user)
         if composition:
             sheets = sheets.filter(composition_id=composition)
+        # Filtré en base, pas à l'écran : un administrateur voit les feuilles
+        # des douze classes, soit près de trois cents lignes pour une seule
+        # composition. En rapatrier la totalité pour n'en afficher qu'une
+        # classe est un gâchis que la connexion d'une école paie.
+        if classroom:
+            sheets = sheets.filter(class_subject__classroom_id=classroom)
 
         return Response(
             {
@@ -544,6 +577,7 @@ class GradeEntryViewSet(TenantViewSetMixin, ViewSet):
 
         from decimal import Decimal, InvalidOperation
 
+        ceiling = sheet.effective_max_score
         known = {g.id: g for g in sheet.grades.all()}
         updates = []
         for entry in entries:
@@ -561,11 +595,14 @@ class GradeEntryViewSet(TenantViewSetMixin, ViewSet):
                     raise ValidationError(
                         {"rows": f"Note illisible pour {grade.student.full_name} : « {raw} »."}
                     )
-                if value < 0 or value > 20:
+                # La borne est le barème **de la feuille**, non 20. Fixée à 20,
+                # elle refusait sans explication toute note d'une matière notée
+                # plus haut — les compétences maths du CM1 le sont sur 60.
+                if value < 0 or value > ceiling:
                     raise ValidationError(
                         {
                             "rows": f"Note hors barème pour {grade.student.full_name} : "
-                            f"{value}. Attendu entre 0 et 20."
+                            f"{value}. Attendu entre 0 et {ceiling}."
                         }
                     )
 

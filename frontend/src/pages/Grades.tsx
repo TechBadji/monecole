@@ -43,13 +43,21 @@ type Sheet = {
 };
 
 type Composition = { id: number; name: string; status: string };
+type ClassOption = { id: number; name: string; sheets: number; validated: number };
 
-/** Une note est valide si elle est vide, absente, ou comprise entre 0 et 20. */
-function gradeError(value: string): string | null {
+/**
+ * Une note est valide si elle est vide, absente, ou comprise entre 0 et le
+ * barème **de la feuille**.
+ *
+ * La borne était fixée à 20, héritée du modèle abandonné : une note de 40 sur
+ * une matière notée sur 60 — les compétences maths du CM1 — était refusée à la
+ * saisie sans que rien ne l'explique.
+ */
+function gradeError(value: string, maxScore: number): string | null {
   if (value.trim() === "") return null;
   const parsed = Number(value.replace(",", "."));
   if (Number.isNaN(parsed)) return "note illisible";
-  if (parsed < 0 || parsed > 20) return "hors barème 0–20";
+  if (parsed < 0 || parsed > maxScore) return `hors barème 0–${maxScore}`;
   return null;
 }
 
@@ -68,8 +76,33 @@ export default function Grades() {
     }
   }, [compositions, composition]);
 
+  // Seules les classes ayant des feuilles pour cette composition : proposer une
+  // classe vide mène à un écran sans rien, que l'utilisateur prend pour une panne.
+  const { data: classOptions } = useResource<ClassOption[]>(
+    composition ? `/grade-sheets/classrooms/?composition=${composition}` : null,
+  );
+  const [classroom, setClassroom] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (!classOptions) return;
+    // Une seule classe — le cas d'un enseignant — se choisit d'elle-même.
+    if (classOptions.length === 1) {
+      setClassroom(classOptions[0].id);
+      return;
+    }
+    // La classe retenue ne survit pas à un changement de composition qui ne la
+    // contient pas : le filtre resterait posé sur une classe absente et la
+    // liste paraîtrait vide.
+    setClassroom((current) =>
+      current && classOptions.some((c) => c.id === current) ? current : null,
+    );
+  }, [classOptions]);
+
   const { data: sheets, reload: reloadSheets } = useResource<{ results: SheetSummary[] }>(
-    composition ? `/grade-sheets/?composition=${composition}` : null,
+    composition
+      ? `/grade-sheets/?composition=${composition}` +
+        (classroom ? `&classroom=${classroom}` : "")
+      : null,
   );
 
   const [selected, setSelected] = useState<number | null>(null);
@@ -101,12 +134,13 @@ export default function Grades() {
   const rows = sheet?.rows ?? [];
   const values = Object.values(draft);
 
+  const maxScore = sheet?.max_score ?? 20;
   const errors = useMemo(
     () =>
       values
-        .filter((row) => !row.is_absent && gradeError(String(row.value ?? "")))
-        .map((row) => `${row.name} : ${gradeError(String(row.value ?? ""))}`),
-    [values],
+        .filter((row) => !row.is_absent && gradeError(String(row.value ?? ""), maxScore))
+        .map((row) => `${row.name} : ${gradeError(String(row.value ?? ""), maxScore)}`),
+    [values, maxScore],
   );
 
   const filled = values.filter(
@@ -222,9 +256,10 @@ export default function Grades() {
         <div>
           <h1>Saisie des notes</h1>
           <p>
-            Notes sur 20. Une note peut être enregistrée seule ou toute la classe en
-            une fois. Un élève absent se coche plutôt que de recevoir un zéro : son
-            barème sort alors du dénominateur.
+            Chaque note se saisit sur le barème de sa matière, indiqué en tête de
+            feuille. Une note s'enregistre seule ou toute la classe en une fois.
+            Un élève absent se coche plutôt que de recevoir un zéro : son barème
+            sort alors du dénominateur.
           </p>
         </div>
       </div>
@@ -247,6 +282,31 @@ export default function Grades() {
             ))}
           </select>
         </div>
+
+        {/* Un administrateur voit les feuilles des douze classes : sans ce
+            filtre, la liste de gauche compte près de trois cents lignes. Il
+            n'apparaît que s'il y a un choix à faire. */}
+        {(classOptions?.length ?? 0) > 1 && (
+          <div className="field" style={{ minWidth: 220 }}>
+            <label htmlFor="classroom">Classe</label>
+            <select
+              id="classroom"
+              value={classroom ?? ""}
+              onChange={(event) => {
+                setClassroom(event.target.value ? Number(event.target.value) : null);
+                setSelected(null);
+              }}
+            >
+              <option value="">Toutes les classes</option>
+              {classOptions?.map((item) => (
+                <option key={item.id} value={item.id}>
+                  {item.name} — {item.validated}/{item.sheets} validée
+                  {item.sheets > 1 ? "s" : ""}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
       </div>
 
       {status && <div className={`alert ${status.kind}`}>{status.text}</div>}
@@ -302,7 +362,7 @@ export default function Grades() {
                   </h2>
                   <p className="muted">
                     {sheet.composition} · noté sur {sheet.max_score}
-                    {average && ` · moyenne saisie ${average}/20`}
+                    {average && ` · moyenne saisie ${average}/${sheet.max_score}`}
                   </p>
                 </div>
                 <div className="page-actions">
@@ -378,7 +438,7 @@ export default function Grades() {
                     <tr>
                       <th style={{ width: 80 }}>Mat.</th>
                       <th>Élève</th>
-                      <th className="num" style={{ width: 110 }}>Note /20</th>
+                      <th className="num" style={{ width: 110 }}>Note /{sheet.max_score}</th>
                       <th style={{ width: 70 }}>Absent</th>
                       <th>Appréciation</th>
                       {sheet.editable && <th style={{ width: 90 }} />}
@@ -389,7 +449,7 @@ export default function Grades() {
                       const current = draft[row.grade] ?? row;
                       const error = current.is_absent
                         ? null
-                        : gradeError(String(current.value ?? ""));
+                        : gradeError(String(current.value ?? ""), sheet.max_score);
                       return (
                         <tr key={row.grade} className={error ? "row-error" : ""}>
                           <td className="muted">{row.matricule}</td>

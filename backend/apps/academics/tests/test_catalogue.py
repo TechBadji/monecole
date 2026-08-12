@@ -217,3 +217,122 @@ class RealReportCardTests(TestCase):
         with tenant_context(self.school):
             results, _, _ = student_results(self.composition, self.ce2)
         self.assertEqual(results[self.student.id]["mention"], "Très bien")
+
+
+class SheetFilteringTests(TestCase):
+    """Filtrage des feuilles de notes par composition et par classe.
+
+    Un administrateur voit les feuilles de toutes les classes : sans filtre,
+    la liste dépasse deux cents lignes pour une seule composition.
+    """
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.school = make_school()
+        cls.year = make_year(cls.school)
+        cls.admin = make_user(cls.school, Role.ADMIN, "admin@test.sn")
+
+        with tenant_context(cls.school):
+            cls.composition = Composition.objects.create(
+                school=cls.school, year=cls.year, name="1er trimestre",
+                kind=Composition.Kind.TERM, term=1, date=cls.year.start_date,
+                status=Composition.Status.OPEN,
+            )
+            cls.rooms = {}
+            for order, name in enumerate(["CI-A", "CI-B", "CM1"]):
+                room = make_classroom(cls.school, name, order=40 + order)
+                cls.rooms[name] = room
+                for index in range(3):
+                    subject = Subject.objects.create(
+                        school=cls.school, code=f"{name}{index}",
+                        name=f"Matière {index}", default_max_score=10,
+                    )
+                    link = ClassSubject.objects.create(
+                        school=cls.school, classroom=room, subject=subject,
+                        year=cls.year, max_score=60 if name == "CM1" else 10,
+                    )
+                    GradeSheet.objects.create(
+                        school=cls.school, composition=cls.composition,
+                        class_subject=link, is_validated=(name == "CI-A"),
+                    )
+
+    def setUp(self):
+        self.client = APIClient()
+        self.client.force_authenticate(self.admin)
+
+    def test_without_a_class_every_sheet_is_returned(self):
+        response = self.client.get(f"/api/grade-sheets/?composition={self.composition.id}")
+        self.assertEqual(len(response.data["results"]), 9)
+
+    def test_a_class_narrows_the_list_in_the_database(self):
+        room = self.rooms["CM1"]
+        response = self.client.get(
+            f"/api/grade-sheets/?composition={self.composition.id}&classroom={room.id}"
+        )
+        self.assertEqual(len(response.data["results"]), 3)
+        self.assertEqual(
+            {row["classroom"] for row in response.data["results"]}, {"CM1"}
+        )
+
+    def test_the_class_list_reports_validation_progress(self):
+        """Le sélecteur sert aussi à voir qui n'a pas fini de saisir."""
+        response = self.client.get(
+            f"/api/grade-sheets/classrooms/?composition={self.composition.id}"
+        )
+        self.assertEqual(response.status_code, 200)
+        rooms = {row["name"]: row for row in response.data}
+        self.assertEqual(rooms["CI-A"], {"id": self.rooms["CI-A"].id, "name": "CI-A",
+                                         "sheets": 3, "validated": 3})
+        self.assertEqual(rooms["CM1"]["validated"], 0)
+
+    def test_only_classes_with_sheets_are_offered(self):
+        """Proposer une classe sans feuille mène à un écran vide."""
+        make_classroom(self.school, "CM2", order=90)
+        response = self.client.get(
+            f"/api/grade-sheets/classrooms/?composition={self.composition.id}"
+        )
+        self.assertNotIn("CM2", {row["name"] for row in response.data})
+
+    def test_a_grade_may_reach_the_sheet_scale_not_twenty(self):
+        """Les compétences maths du CM1 sont notées sur 60.
+
+        Une borne fixée à 20 refusait la note sans rien expliquer.
+        """
+        with tenant_context(self.school):
+            sheet = GradeSheet.objects.filter(
+                class_subject__classroom=self.rooms["CM1"]
+            ).first()
+            student = make_student(self.school, self.rooms["CM1"], "Awa", "Diop")
+            grade = Grade.objects.create(
+                school=self.school, sheet=sheet, student=student
+            )
+
+        response = self.client.post(
+            f"/api/grade-sheets/{sheet.id}/save/",
+            {"rows": [{"grade": grade.pk, "value": "45"}]},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 200, response.data)
+
+        with tenant_context(self.school):
+            grade.refresh_from_db()
+            self.assertEqual(grade.value, Decimal("45.00"))
+
+    def test_a_grade_above_the_sheet_scale_is_refused(self):
+        with tenant_context(self.school):
+            sheet = GradeSheet.objects.filter(
+                class_subject__classroom=self.rooms["CI-A"]
+            ).first()
+            sheet.is_validated = False
+            sheet.save()
+            student = make_student(self.school, self.rooms["CI-A"], "Moussa", "Fall")
+            grade = Grade.objects.create(
+                school=self.school, sheet=sheet, student=student
+            )
+
+        response = self.client.post(
+            f"/api/grade-sheets/{sheet.id}/save/",
+            {"rows": [{"grade": grade.pk, "value": "45"}]},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 400, response.data)

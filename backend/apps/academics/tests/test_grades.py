@@ -270,14 +270,30 @@ class GradeEntryTests(AcademicsTestCase):
         self.grade_row.refresh_from_db()
         self.assertEqual(self.grade_row.value, Decimal("14.50"))
 
-    def test_grade_above_twenty_is_refused(self):
-        response = self.client.post(
+    def test_a_grade_above_the_sheet_scale_is_refused(self):
+        """La borne est le barème de la feuille, non un 20 universel.
+
+        Ce test attendait autrefois un refus à 22, ce qui n'a plus de sens :
+        la feuille est notée sur 40, et 22 y est une note ordinaire.
+        """
+        scale = self.subjects["FR"].max_score
+        self.assertEqual(scale, 40)
+
+        accepted = self.client.post(
             f"/api/grade-sheets/{self.sheet.pk}/save/",
             {"rows": [{"grade": self.grade_row.pk, "value": "22"}]},
             format="json",
         )
-        self.assertEqual(response.status_code, 400)
-        self.assertIn("hors barème", str(response.data))
+        self.assertEqual(accepted.status_code, 200, accepted.data)
+
+        refused = self.client.post(
+            f"/api/grade-sheets/{self.sheet.pk}/save/",
+            {"rows": [{"grade": self.grade_row.pk, "value": str(scale + 1)}]},
+            format="json",
+        )
+        self.assertEqual(refused.status_code, 400)
+        self.assertIn("hors barème", str(refused.data))
+        self.assertIn(str(scale), str(refused.data))
 
     def test_unreadable_grade_names_the_student(self):
         response = self.client.post(
