@@ -31,6 +31,7 @@ from rest_framework.views import APIView
 
 from .audit import record
 from .models import AuditLog, LoginSession, PasswordResetToken, User
+from .permissions import PasswordChangeRequired
 
 # Taille maximale d'une photo de profil. Le personnel charge des photos prises
 # au téléphone, qui pèsent couramment 4 à 8 Mo ; on borne avant de redimensionner.
@@ -113,7 +114,7 @@ class ProfileSerializer(serializers.ModelSerializer):
 class ProfileView(APIView):
     """Lecture et modification du profil de l'utilisateur connecté."""
 
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, PasswordChangeRequired]
 
     def patch(self, request):
         serializer = ProfileSerializer(request.user, data=request.data, partial=True)
@@ -145,6 +146,9 @@ def profile_payload(user):
         "phone": user.phone,
         "photo": user.photo.url if user.photo else None,
         "initials": user.initials,
+        # L'interface doit pouvoir imposer l'écran de changement dès la
+        # connexion, sans attendre un premier refus de l'API.
+        "must_change_password": user.must_change_password,
         "role": user.role,
         "role_label": user.get_role_display(),
         "school": (
@@ -163,7 +167,7 @@ def profile_payload(user):
 class ProfilePhotoView(APIView):
     """Chargement et retrait de la photo de profil."""
 
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, PasswordChangeRequired]
 
     def post(self, request):
         upload = request.FILES.get("photo")
@@ -279,6 +283,10 @@ class PasswordChangeView(APIView):
 
         # L'appareil courant survit : forcer l'utilisateur à se reconnecter
         # après avoir changé son mot de passe est une punition, pas une mesure.
+        if user.must_change_password:
+            user.must_change_password = False
+            user.save(update_fields=["must_change_password"])
+
         kept = current_session_sid(request)
         revoked = revoke_sessions(user, keep_sid=kept)
         record(request, AuditLog.Action.UPDATE, user)
@@ -459,7 +467,7 @@ class SessionSerializer(serializers.ModelSerializer):
 
 
 class SessionListView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, PasswordChangeRequired]
 
     def get(self, request):
         sessions = request.user.sessions.filter(
@@ -473,7 +481,7 @@ class SessionListView(APIView):
 
 
 class SessionRevokeView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, PasswordChangeRequired]
 
     def delete(self, request, pk):
         session = request.user.sessions.filter(pk=pk).first()

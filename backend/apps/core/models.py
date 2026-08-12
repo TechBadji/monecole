@@ -173,6 +173,15 @@ class User(AbstractUser):
     last_name = models.CharField("nom", max_length=150, blank=True)
     phone = models.CharField("téléphone", max_length=30, blank=True)
     photo = models.ImageField("photo", upload_to="avatars/", null=True, blank=True)
+    must_change_password = models.BooleanField(
+        "mot de passe à renouveler",
+        default=False,
+        help_text=(
+            "Posé sur les comptes créés à l'ouverture d'un établissement. Tant "
+            "qu'il est vrai, le compte ne peut rien faire d'autre que changer "
+            "son mot de passe."
+        ),
+    )
     role = models.CharField("rôle", max_length=20, choices=Role.choices, default=Role.SECRETARY)
     school = models.ForeignKey(
         School,

@@ -1,6 +1,8 @@
 from django.contrib.auth import get_user_model
 from django.utils.dateparse import parse_datetime
 from rest_framework import mixins, viewsets
+from rest_framework.decorators import action
+from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -87,6 +89,66 @@ class SchoolViewSet(viewsets.ModelViewSet):
         if user.is_super_admin:
             return School.objects.all()
         return School.objects.filter(pk=user.school_id)
+
+    @action(detail=False, methods=["post"], url_path="provision")
+    def provision(self, request):
+        """Ouvre un établissement : année courante, classes et accès.
+
+        Les mots de passe ne sont renvoyés qu'ici, une seule fois. Ils ne sont
+        stockés nulle part en clair et ne peuvent pas être relus : le
+        super-administrateur les transmet, l'école les change à la première
+        connexion.
+        """
+        from .provisioning import provision_school
+
+        if not request.user.is_super_admin:
+            raise PermissionDenied("Seul le super-administrateur ouvre un établissement.")
+
+        name = (request.data.get("name") or "").strip()
+        if not name:
+            raise ValidationError({"name": "Le nom de l'établissement est requis."})
+
+        try:
+            start_year = int(request.data.get("start_year") or 0)
+        except (TypeError, ValueError):
+            start_year = 0
+        if not 2000 <= start_year <= 2100:
+            raise ValidationError(
+                {"start_year": "Indiquez l'année d'ouverture de l'exercice, par exemple 2026."}
+            )
+
+        school, year, accounts = provision_school(
+            name=name,
+            start_year=start_year,
+            address=request.data.get("address") or "",
+            phone=request.data.get("phone") or "",
+            email=request.data.get("email") or "",
+            max_students=int(request.data.get("max_students") or 100),
+        )
+        record(request, AuditLog.Action.CREATE, school)
+
+        return Response(
+            {
+                "school": SchoolSerializer(school).data,
+                "year": year.label,
+                "classes": 10,
+                "accounts": [
+                    {
+                        "role": a.role,
+                        "label": a.full_name,
+                        "email": a.email,
+                        "password": a.password,
+                    }
+                    for a in accounts
+                ],
+                "detail": (
+                    "Établissement ouvert. Transmettez ces accès : les mots de "
+                    "passe ne sont affichés qu'une fois et devront être changés "
+                    "à la première connexion."
+                ),
+            },
+            status=201,
+        )
 
 
 class SubscriptionViewSet(viewsets.ModelViewSet):

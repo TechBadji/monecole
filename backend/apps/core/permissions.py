@@ -92,10 +92,29 @@ class RoleBasedPermission(BasePermission):
 
     message = "Votre rôle ne vous autorise pas cette opération."
 
+    # Ce que peut faire un compte dont le mot de passe est encore celui remis à
+    # l'ouverture de l'école : lire son profil, et le changer. Rien d'autre.
+    # Se contenter d'un écran de rappel côté interface laisserait l'API grande
+    # ouverte à un mot de passe qui a transité par courrier ou par téléphone.
+    PASSWORD_CHANGE_ONLY = {
+        "/api/auth/me/",
+        "/api/auth/me/password/",
+        "/api/auth/refresh/",
+        "/api/auth/verify/",
+    }
+
     def has_permission(self, request, view):
         user = request.user
         if not user or not user.is_authenticated:
             return False
+
+        if getattr(user, "must_change_password", False):
+            if request.path not in self.PASSWORD_CHANGE_ONLY:
+                self.message = (
+                    "Ce compte utilise encore son mot de passe provisoire. "
+                    "Changez-le pour accéder à l'application."
+                )
+                return False
 
         resource = getattr(view, "resource", None)
         if resource is None:
@@ -106,3 +125,20 @@ class RoleBasedPermission(BasePermission):
             return False
 
         return has_perm(user.role, resource, action)
+
+
+class PasswordChangeRequired(BasePermission):
+    """Ferme les vues sans `resource` à un compte au mot de passe provisoire.
+
+    `RoleBasedPermission` porte déjà le verrou, mais les vues du compte —
+    profil, photo, sessions — ne passent pas par la matrice des rôles. Sans
+    cette classe, elles resteraient ouvertes.
+    """
+
+    message = (
+        "Ce compte utilise encore son mot de passe provisoire. Changez-le pour "
+        "accéder à l'application."
+    )
+
+    def has_permission(self, request, view):
+        return not getattr(request.user, "must_change_password", False)
