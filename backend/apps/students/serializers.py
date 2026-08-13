@@ -27,6 +27,24 @@ class ClassRoomSerializer(serializers.ModelSerializer):
             "teacher", "teacher_name",
         ]
 
+    def validate(self, attrs):
+        """Refuse un `teacher` posé sur la classe.
+
+        Le champ est calculé — l'affectation est annuelle — donc DRF l'ignorait
+        en silence : la requête répondait 200 et rien ne changeait. Un appel qui
+        ne fait rien sans le dire est pire qu'un appel refusé.
+        """
+        if "teacher" in self.initial_data:
+            raise serializers.ValidationError(
+                {
+                    "teacher": (
+                        "Le titulaire dépend de l'année scolaire. Utilisez "
+                        "PUT /api/classes/<id>/teacher/ avec le champ `year`."
+                    )
+                }
+            )
+        return attrs
+
     def _link(self, obj):
         for link in getattr(obj, "year_teachers", []):
             return link

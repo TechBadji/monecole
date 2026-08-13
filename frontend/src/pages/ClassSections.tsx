@@ -2,6 +2,7 @@ import { useState } from "react";
 
 import { api } from "../api";
 import { useResource } from "../hooks";
+import { useYear } from "../year";
 
 type Grade = {
   code: string;
@@ -33,6 +34,9 @@ const LEVEL_LABELS: Record<string, string> = {
  * départage — c'est le serveur qui le calcule.
  */
 export default function ClassSections({ isAdmin }: { isAdmin: boolean }) {
+  // L'affectation vaut pour l'année consultée : un titulaire change d'une
+  // rentrée à l'autre.
+  const { selected: year } = useYear();
   const { data: grades, reload } = useResource<Grade[]>("/classes/grades/");
   const { data: classes, reload: reloadClasses } =
     useResource<{ results: ClassRoom[] }>("/classes/?page_size=100");
@@ -80,8 +84,12 @@ export default function ClassSections({ isAdmin }: { isAdmin: boolean }) {
     setBusy(true);
     setStatus(null);
     try {
-      await api.patch(`/classes/${classroom.id}/`, {
+      // `PUT …/teacher/` et non un `PATCH` sur la classe : l'affectation porte
+      // une année, et le champ `teacher` de la classe est calculé. L'ancien
+      // appel répondait 200 sans rien changer.
+      await api.put(`/classes/${classroom.id}/teacher/`, {
         teacher: teacherId ? Number(teacherId) : null,
+        year: year?.id,
       });
       reloadClasses();
       setStatus({
