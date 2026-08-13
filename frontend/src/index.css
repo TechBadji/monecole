@@ -710,18 +710,26 @@ button.small {
   font-size: var(--text-sm);
 }
 
+/* Bouton discret sur surface claire — cartes et tableaux.
+   Il portait `--on-brand-muted`, du blanc à 72 % : hérité du temps où il servait
+   au pied de la barre marine, il était devenu illisible sur ses sept usages
+   actuels, tous sur fond blanc. Le texte prime sur le contour : un bouton sans
+   fond doit rester lisible seul. */
 button.ghost {
-  padding: 6px var(--space-2);
-  justify-content: flex-start;
+  padding: 6px var(--space-3);
   background: transparent;
   border-color: transparent;
-  color: var(--on-brand-muted);
+  color: var(--text-secondary);
 }
 
 button.ghost:hover:not(:disabled) {
-  background: rgb(255 255 255 / 8%);
-  border-color: transparent;
-  color: var(--on-brand);
+  background: var(--surface-sunken);
+  border-color: var(--border);
+  color: var(--text);
+}
+
+button.ghost:disabled {
+  color: var(--muted);
 }
 
 button.link {
@@ -2543,4 +2551,28 @@ tr.detail-row:hover > * { background: inherit; }
 
 .provisioned {
   border-color: var(--warning);
+}
+
+/* Deux informations dans une cellule : la principale, puis sa précision. */
+.stacked-cell {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.35;
+}
+
+.stacked-cell .muted {
+  font-size: var(--text-sm);
+}
+
+/* Colonne d'actions de fin de ligne : largeur juste, jamais coupée. */
+.row-actions-head { width: 1%; }
+
+.row-actions {
+  width: 1%;
+  white-space: nowrap;
+}
+
+.row-actions-group {
+  display: inline-flex;
+  gap: var(--space-2);
 }

@@ -15,15 +15,35 @@ from .models import (
 
 class TeacherSerializer(serializers.ModelSerializer):
     full_name = serializers.CharField(read_only=True)
+    has_account = serializers.SerializerMethodField()
+
+    def get_has_account(self, obj):
+        """Un enseignant sans compte ne peut pas saisir ses notes.
+
+        Le rattachement se fait par email. Le signaler à l'écran évite la
+        situation où l'administration croit avoir donné l'accès et l'enseignant
+        ne voit rien.
+        """
+        if not obj.email:
+            return False
+        from apps.core.models import Role, User
+
+        return User.objects.filter(
+            email__iexact=obj.email, role=Role.TEACHER, is_active=True
+        ).exists()
 
     class Meta:
         model = Teacher
         fields = [
             "id", "matricule", "first_name", "last_name", "full_name", "sex",
+            # Coordonnées : absentes jusqu'ici alors que le modèle les porte.
+            # L'email n'est pas décoratif — c'est lui qui relie un enseignant à
+            # son compte pour la saisie des notes.
+            "phone", "email", "address", "emergency_contact",
             "date_of_birth", "cni", "marital_status", "corps", "grade",
             "academic_diploma", "professional_diploma", "entry_date", "specialty",
             "function", "service_start_date", "courses_taught", "class_type",
-            "students_count", "contract_type", "is_active", "created_at",
+            "students_count", "contract_type", "is_active", "has_account", "created_at",
         ]
         # Le matricule est attribué par le système, jamais soumis par le client.
         read_only_fields = ["matricule", "created_at"]
