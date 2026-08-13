@@ -197,6 +197,13 @@ PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "http://localhost:5173")
 # --- Sécurité (production) ---------------------------------------------------
 if not DEBUG:
     SECURE_SSL_REDIRECT = True
+    # Le point de santé échappe à la redirection HTTPS.
+    #
+    # Docker l'interroge en clair sur la boucle locale : redirigé, il suivait
+    # vers un port qui ne parle pas TLS, la sonde échouait, et le conteneur
+    # était déclaré malade alors qu'il tournait. Le trafic concerné ne quitte
+    # jamais la machine.
+    SECURE_REDIRECT_EXEMPT = [r"^health/$"]
     SESSION_COOKIE_SECURE = True
     CSRF_COOKIE_SECURE = True
     SECURE_HSTS_SECONDS = 31536000

@@ -1,0 +1,10 @@
+**/.venv
+**/node_modules
+**/dist
+**/__pycache__
+**/*.pyc
+**/.env
+**/media
+**/staticfiles
+.git
+docs/modele-source.xlsx

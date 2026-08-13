@@ -2,6 +2,9 @@
 .venv/
 __pycache__/
 *.py[cod]
+# Le compose de production lit un `.env` à la racine : il porte la clé de
+# signature, le mot de passe PostgreSQL et les identifiants SMTP.
+.env
 backend/.env
 backend/media/
 backend/staticfiles/
