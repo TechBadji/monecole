@@ -1,13 +1,39 @@
 # Déploiement sur Hetzner
 
-Même schéma que le projet `pmc` : PostgreSQL, Django sous gunicorn, interface
-statique, nginx en frontal, le tout sous Docker Compose.
+Sous **Coolify**, comme le projet `pmc`. Coolify occupe déjà les ports 80 et
+443 du serveur avec son propre frontal : il route le domaine vers le service
+`nginx` de la pile et renouvelle le certificat. Le compose ne publie donc
+**aucun port** — le faire échouerait sur un conflit d'adresse.
+
+Même schéma interne que `pmc` : PostgreSQL, Django sous gunicorn, interface
+statique, nginx devant.
 
 ```
 Internet → nginx :80 ─┬→ /api /admin /static /media → backend:8000 (gunicorn)
                       └→ /                          → frontend:3000 (serve)
                                                        backend → db:5432
 ```
+
+## Créer l'application dans Coolify
+
+1. **Nouvelle ressource → Docker Compose**, dépôt `TechBadji/monecole`,
+   branche `main`, fichier `docker-compose.prod.yml`.
+2. **Domaine** : le poser sur le service **`nginx`**, et sur lui seul. Les
+   autres services n'ont pas à être joignables de l'extérieur — surtout pas la
+   base.
+3. **Variables d'environnement** : voir la section suivante. Coolify les
+   injecte dans la pile ; elles ne vivent jamais dans le dépôt.
+4. **Déployer.** Migrations et fichiers statiques s'exécutent au démarrage du
+   conteneur `backend`.
+
+Le DNS doit pointer sur le serveur **avant** le premier déploiement, faute de
+quoi la validation du certificat échoue sans message clair.
+
+## Installation autonome, sans Coolify
+
+Le reste de ce document décrit l'installation directe, utile sur un serveur
+neuf. Il faut alors republier le port dans `docker-compose.prod.yml` :
+`ports: ["80:80"]` à la place de `expose`.
 
 ## Le serveur
 

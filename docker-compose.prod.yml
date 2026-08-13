@@ -1,9 +1,12 @@
-# Déploiement MonÉcole — Hetzner, même schéma que le projet pmc.
+# Déploiement MonÉcole — Hetzner, sous Coolify, comme le projet pmc.
 #
-#   docker compose -f docker-compose.prod.yml up -d --build
+# **Aucun port n'est publié sur l'hôte.** Coolify occupe déjà 80 et 443 avec son
+# propre frontal, et c'est lui qui route le domaine vers le service `nginx` et
+# renouvelle le certificat. Publier un port ici ferait échouer le démarrage sur
+# un conflit d'adresse.
 #
-# Les variables sensibles vivent dans `.env`, jamais dans ce fichier : il est
-# suivi par git, et le dépôt est public. Voir docs/deploiement.md.
+# Les variables sensibles se saisissent dans Coolify, jamais dans ce fichier :
+# il est suivi par git, et le dépôt est public. Voir docs/deploiement.md.
 
 services:
   db:
@@ -39,11 +42,30 @@ services:
       sh -c "python manage.py migrate --noinput &&
              python manage.py collectstatic --noinput &&
              gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers 3 --timeout 180"
-    env_file:
-      - .env
     environment:
       POSTGRES_HOST: db
       DJANGO_DEBUG: "0"
+      # Les variables suivantes sont injectées par Coolify, saisies dans son
+      # interface : DJANGO_SECRET_KEY, DJANGO_ALLOWED_HOSTS, PUBLIC_BASE_URL,
+      # POSTGRES_PASSWORD, les identifiants SMTP, SMS et Wave.
+      DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:?clé de signature requise}
+      DJANGO_ALLOWED_HOSTS: ${DJANGO_ALLOWED_HOSTS:?domaine requis}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:?adresse publique requise}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-}
+      POSTGRES_DB: ${POSTGRES_DB:-monecole}
+      POSTGRES_USER: ${POSTGRES_USER:-monecole}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      EMAIL_HOST: ${EMAIL_HOST:-smtp.gmail.com}
+      EMAIL_PORT: ${EMAIL_PORT:-587}
+      EMAIL_USE_TLS: ${EMAIL_USE_TLS:-1}
+      EMAIL_HOST_USER: ${EMAIL_HOST_USER:-}
+      EMAIL_HOST_PASSWORD: ${EMAIL_HOST_PASSWORD:-}
+      DEFAULT_FROM_EMAIL: ${DEFAULT_FROM_EMAIL:-}
+      LAM_ACCESS_KEY: ${LAM_ACCESS_KEY:-}
+      LAM_ACCESS_PASSWORD: ${LAM_ACCESS_PASSWORD:-}
+      LAM_SENDER: ${LAM_SENDER:-MONECOLE}
+      WAVE_API_KEY: ${WAVE_API_KEY:-}
+      WAVE_WEBHOOK_SECRET: ${WAVE_WEBHOOK_SECRET:-}
     volumes:
       # Photos de profil, logos d'établissement, justificatifs de dépense : ils
       # vivent hors de l'image, sinon un redéploiement les efface.
@@ -89,8 +111,10 @@ services:
       context: ./nginx
       dockerfile: Dockerfile
     restart: unless-stopped
-    ports:
-      - "80:80"
+    # `expose` et non `ports` : le frontal de Coolify joint ce conteneur par le
+    # réseau Docker, et publier 80 sur l'hôte entrerait en conflit avec lui.
+    expose:
+      - "80"
     depends_on:
       backend:
         condition: service_healthy
